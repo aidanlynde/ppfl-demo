@@ -1,0 +1,21 @@
+# API
+fastapi==0.99.1
+uvicorn[standard]==0.22.0
+python-dotenv==1.0.0
+pydantic>=1.7.4,<2.0.0
+
+# Machine Learning (we'll add these later)
+# tensorflow==2.13.0
+# tensorflow-federated==0.44.0
+# numpy==1.24.3
+# pandas==2.0.3
+# tensorflow-privacy==0.8.10
+
+# Testing
+pytest==7.4.0
+httpx==0.24.1
+
+# Development
+black==23.3.0
+flake8==6.0.0
+isort==5.12.0
