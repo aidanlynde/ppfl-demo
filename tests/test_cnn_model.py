@@ -2,7 +2,7 @@
 
 import pytest
 import numpy as np
-from models import MNISTModel
+from models.federated.cnn_model import MNISTModel
 from utils import MNISTDataHandler
 
 @pytest.fixture
