@@ -1,0 +1,1 @@
+from .federated.cnn_model import MNISTModel
