@@ -1,7 +1,7 @@
 # utils/data_handler.py
 
 import numpy as np
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, Optional
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
@@ -9,16 +9,18 @@ from sklearn.model_selection import train_test_split
 class MNISTDataHandler:
     """Handles MNIST dataset loading, preprocessing, and partitioning for federated learning."""
     
-    def __init__(self, num_clients: int = 5, validation_split: float = 0.1):
+    def __init__(self, num_clients: int = 5, validation_split: float = 0.1, test_mode: bool = False):
         """
         Initialize the data handler.
         
         Args:
             num_clients: Number of federated learning clients to simulate
             validation_split: Fraction of training data to use for validation
+            test_mode: If True, uses a smaller subset of data for testing
         """
         self.num_clients = num_clients
         self.validation_split = validation_split
+        self.test_mode = test_mode
         self.x_train = None
         self.y_train = None
         self.x_test = None
@@ -28,19 +30,26 @@ class MNISTDataHandler:
         self.client_data = {}
         self.input_shape = (28, 28, 1)
         self.num_classes = 10
-        
+    
     def load_and_preprocess_data(self) -> None:
         """Load and preprocess the MNIST dataset."""
         # Load MNIST data
-        (self.x_train, self.y_train), (self.x_test, self.y_test) = mnist.load_data()
+        (x_train, y_train), (x_test, y_test) = mnist.load_data()
+        
+        if self.test_mode:
+            # Use only a small subset of data for testing
+            x_train = x_train[:1000]  # Use 1000 training samples
+            y_train = y_train[:1000]
+            x_test = x_test[:200]    # Use 200 test samples
+            y_test = y_test[:200]
         
         # Normalize and reshape data
-        self.x_train = self._preprocess_features(self.x_train)
-        self.x_test = self._preprocess_features(self.x_test)
+        self.x_train = self._preprocess_features(x_train)
+        self.x_test = self._preprocess_features(x_test)
         
         # Convert labels to categorical
-        self.y_train = to_categorical(self.y_train, self.num_classes)
-        self.y_test = to_categorical(self.y_test, self.num_classes)
+        self.y_train = to_categorical(y_train, self.num_classes)
+        self.y_test = to_categorical(y_test, self.num_classes)
         
         # Split training data into train and validation sets
         self.x_train, self.x_val, self.y_train, self.y_val = train_test_split(
@@ -48,17 +57,9 @@ class MNISTDataHandler:
             test_size=self.validation_split,
             random_state=42
         )
-        
+
     def _preprocess_features(self, data: np.ndarray) -> np.ndarray:
-        """
-        Preprocess feature data.
-        
-        Args:
-            data: Input data to preprocess
-            
-        Returns:
-            Preprocessed data
-        """
+        """Preprocess feature data."""
         # Normalize pixel values
         data = data.astype('float32') / 255.0
         
@@ -69,12 +70,7 @@ class MNISTDataHandler:
         return data
         
     def partition_data(self, strategy: str = 'iid') -> None:
-        """
-        Partition data among clients using specified strategy.
-        
-        Args:
-            strategy: Data partitioning strategy ('iid' for independent and identically distributed)
-        """
+        """Partition data among clients using specified strategy."""
         if strategy == 'iid':
             self._partition_iid()
         else:
@@ -102,15 +98,7 @@ class MNISTDataHandler:
             }
     
     def get_client_data(self, client_id: int) -> Dict[str, np.ndarray]:
-        """
-        Get training data for a specific client.
-        
-        Args:
-            client_id: ID of the client
-            
-        Returns:
-            Dictionary containing client's training data
-        """
+        """Get training data for a specific client."""
         if client_id not in self.client_data:
             raise ValueError(f"Client ID {client_id} not found")
         return self.client_data[client_id]

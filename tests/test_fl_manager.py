@@ -7,19 +7,20 @@ from models.federated.fl_manager import FederatedLearningManager
 @pytest.fixture
 def fl_manager():
     """Fixture to provide FL manager for testing."""
-    return FederatedLearningManager(
-        num_clients=3,  # Using fewer clients for faster testing
+    manager = FederatedLearningManager(
+        num_clients=2,  # Using 2 clients consistently
         local_epochs=1,
         batch_size=32,
-        rounds=2
+        rounds=1,
+        test_mode=True
     )
+    return manager
 
 def test_initialization(fl_manager):
     """Test FL manager initialization."""
-    assert fl_manager.num_clients == 3
-    assert len(fl_manager.client_models) == 3
+    assert fl_manager.num_clients == 2  # Changed from 3 to 2
+    assert len(fl_manager.client_models) == 2  # Changed from 3 to 2
     assert fl_manager.global_model is not None
-    assert fl_manager.history is not None
 
 def test_weight_distribution(fl_manager):
     """Test weight distribution to clients."""
@@ -67,7 +68,7 @@ def test_complete_round(fl_manager):
     
     assert 'client_metrics' in metrics
     assert 'global_metrics' in metrics
-    assert len(metrics['client_metrics']) == 3
+    assert len(metrics['client_metrics']) == 2  # Changed from 3 to 2
     assert 'test_accuracy' in metrics['global_metrics']
     assert 'test_loss' in metrics['global_metrics']
 

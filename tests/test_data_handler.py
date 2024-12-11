@@ -4,6 +4,13 @@ import pytest
 import numpy as np
 from utils.data_handler import MNISTDataHandler
 
+@pytest.fixture
+def data_handler():
+    """Fixture to provide data for testing."""
+    handler = MNISTDataHandler(num_clients=3, test_mode=True)
+    handler.load_and_preprocess_data()
+    return handler
+
 def test_data_loading():
     """Test basic data loading and preprocessing."""
     handler = MNISTDataHandler(num_clients=5)

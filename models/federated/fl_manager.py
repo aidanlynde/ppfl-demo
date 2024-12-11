@@ -13,12 +13,14 @@ class FederatedLearningManager:
         num_clients: int = 5,
         local_epochs: int = 1,
         batch_size: int = 32,
-        rounds: int = 10
+        rounds: int = 10,
+        test_mode: bool = False
     ):
         self.num_clients = num_clients
         self.local_epochs = local_epochs
         self.batch_size = batch_size
         self.rounds = rounds
+        self.test_mode = test_mode
         
         # Training history
         self.history = {
@@ -31,8 +33,10 @@ class FederatedLearningManager:
     
     def _initialize_setup(self) -> None:
         """Initialize data handler and models."""
-        # Set up data handler
-        self.data_handler = MNISTDataHandler(num_clients=self.num_clients)
+        self.data_handler = MNISTDataHandler(
+            num_clients=self.num_clients,
+            test_mode=self.test_mode
+        )
         self.data_handler.load_and_preprocess_data()
         self.data_handler.partition_data()
         

@@ -8,7 +8,7 @@ from utils import MNISTDataHandler
 @pytest.fixture
 def data_handler():
     """Fixture to provide data for testing."""
-    handler = MNISTDataHandler(num_clients=1)
+    handler = MNISTDataHandler(num_clients=1, test_mode=True)
     handler.load_and_preprocess_data()
     return handler
 
