@@ -3,6 +3,7 @@ fastapi==0.99.1
 uvicorn[standard]==0.22.0
 python-dotenv==1.0.0
 pydantic>=1.7.4,<2.0.0
+gunicorn==21.2.0
 
 # Machine Learning
 tensorflow==2.13.0
