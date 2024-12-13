@@ -50,6 +50,9 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             test_mode=test_mode
         )
         
+        self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
+        self.batch_size = 16 if test_mode else batch_size
+        
         # Initialize privacy mechanism
         self.privacy_mechanism = PrivacyMechanism(
             noise_multiplier=noise_multiplier,
