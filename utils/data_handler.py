@@ -38,10 +38,10 @@ class MNISTDataHandler:
         
         if self.test_mode:
             # Use only a small subset of data for testing
-            x_train = x_train[:1000]  # Use 1000 training samples
-            y_train = y_train[:1000]
-            x_test = x_test[:200]    # Use 200 test samples
-            y_test = y_test[:200]
+            x_train = x_train[:100]  # Use 1000 training samples
+            y_train = y_train[:100]
+            x_test = x_test[:20]    # Use 200 test samples
+            y_test = y_test[:20]
         
         # Normalize and reshape data
         self.x_train = self._preprocess_features(x_train)

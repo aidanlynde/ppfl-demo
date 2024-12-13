@@ -1,7 +1,9 @@
 # api/main.py
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from config.settings import settings
+from api.routers.fl_routes import router as fl_router
 
 app = FastAPI(
     title="Privacy-Preserving Federated Learning Demo",
@@ -17,6 +19,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include FL routes
+app.include_router(fl_router, prefix="/api/fl", tags=["Federated Learning"])
 
 @app.get("/")
 async def root():
@@ -38,7 +43,7 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "api.main:app",  # Updated import path
         host="0.0.0.0",
         port=8000,
         reload=True,
