@@ -55,6 +55,10 @@ async def initialize_training(config: TrainingConfig) -> Dict[str, Any]:
             "config": config.dict(),
             "initial_metrics": fl_manager.get_privacy_metrics()
         }
+
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

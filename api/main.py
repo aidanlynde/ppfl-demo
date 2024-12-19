@@ -14,11 +14,34 @@ app = FastAPI(
 # Configure CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=False,  
-    allow_methods=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
+# Add Gzip compression
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
+
+# Add options handler for CORS preflight
+@app.options("/{full_path:path}")
+async def options_handler():
+    return JSONResponse(
+        content="OK",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 # Include FL routes
 app.include_router(fl_router, prefix="/api/fl", tags=["Federated Learning"])
