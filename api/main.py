@@ -4,6 +4,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from config.settings import settings
 from api.routers.fl_routes import router as fl_router
+from fastapi.responses import JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
 
 app = FastAPI(
     title="Privacy-Preserving Federated Learning Demo",
