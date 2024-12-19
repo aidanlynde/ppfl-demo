@@ -36,11 +36,11 @@ class ClientInfo(BaseModel):
     privacy_impact: Dict[str, float]
 
 @router.post("/initialize")
-async def initialize_training(config: TrainingConfig) -> Dict[str, Any]:
-    """Initialize the federated learning process."""
-    global fl_manager
-    
+async def initialize_training(config: TrainingConfig):
     try:
+        print("Received initialization request with config:", config.dict())  # Debug log
+        
+        global fl_manager
         fl_manager = PrivateFederatedLearningManager(
             num_clients=config.num_clients,
             local_epochs=config.local_epochs,
@@ -48,18 +48,15 @@ async def initialize_training(config: TrainingConfig) -> Dict[str, Any]:
             noise_multiplier=config.noise_multiplier,
             l2_norm_clip=config.l2_norm_clip
         )
+        print("FL Manager initialized successfully")  # Debug log
         
         return {
             "status": "success",
             "message": "Federated learning initialized",
-            "config": config.dict(),
-            "initial_metrics": fl_manager.get_privacy_metrics()
+            "config": config.dict()
         }
-
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        return response
-        
     except Exception as e:
+        print(f"Error during initialization: {str(e)}")  # Debug log
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/train_round")

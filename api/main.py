@@ -48,6 +48,13 @@ async def options_handler():
 # Include FL routes
 app.include_router(fl_router, prefix="/api/fl", tags=["Federated Learning"])
 
+@app.post("/test-init")
+async def test_initialize():
+    return {
+        "status": "success",
+        "message": "Test initialization endpoint working"
+    }
+    
 @app.get("/")
 async def root():
     """Root endpoint to verify API is running"""
