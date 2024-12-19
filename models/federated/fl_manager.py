@@ -63,32 +63,47 @@ class FederatedLearningManager:
     
     def train_round(self) -> Dict[str, Any]:
         """Execute one round of federated learning."""
-        round_metrics = {}
-        
-        # Distribute global weights to clients
-        self._distribute_weights()
-        
-        # Train each client
-        client_metrics = {}
-        for client_id in range(self.num_clients):
-            metrics = self._train_client(client_id)
-            client_metrics[client_id] = metrics
-        
-        # Aggregate weights
-        self._aggregate_weights()
-        
-        # Evaluate global model
-        global_metrics = self._evaluate_global_model()
-        
-        # Store metrics
-        round_metrics = {
-            'client_metrics': client_metrics,
-            'global_metrics': global_metrics
-        }
-        self.history['round_metrics'].append(round_metrics)
-        self.history['global_metrics'].append(global_metrics)
-        
-        return round_metrics
+        try:
+            print("FL Manager: Starting training round")
+            client_metrics = {}
+            
+            # Train each client
+            for client_id in range(self.num_clients):
+                print(f"Training client {client_id}")
+                try:
+                    metrics = self._train_client(client_id)
+                    client_metrics[client_id] = metrics
+                    print(f"Client {client_id} training complete: {metrics}")
+                except Exception as e:
+                    print(f"Error training client {client_id}: {str(e)}")
+                    raise
+            
+            # Aggregate results
+            print("Aggregating results")
+            try:
+                self._aggregate_weights()
+                print("Weight aggregation complete")
+            except Exception as e:
+                print(f"Error during weight aggregation: {str(e)}")
+                raise
+            
+            # Evaluate global model
+            print("Evaluating global model")
+            try:
+                global_metrics = self._evaluate_global_model()
+                print(f"Evaluation complete: {global_metrics}")
+            except Exception as e:
+                print(f"Error during evaluation: {str(e)}")
+                raise
+            
+            return {
+                "client_metrics": client_metrics,
+                "global_metrics": global_metrics
+            }
+            
+        except Exception as e:
+            print(f"Error in train_round: {str(e)}")
+            raise
     
     def _distribute_weights(self) -> None:
         """Distribute global model weights to all clients."""

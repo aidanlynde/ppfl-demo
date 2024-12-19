@@ -77,27 +77,47 @@ async def train_round() -> Dict[str, Any]:
     """Execute one round of federated learning."""
     global fl_manager
     
+    print("=== Starting Training Round ===")
     try:
-        print("Starting training round...")
         if fl_manager is None:
+            print("Error: FL Manager is None")
             raise HTTPException(
                 status_code=400,
-                detail="Federated learning not initialized. Call /initialize first."
+                detail="Federated learning not initialized"
             )
+
+        print(f"Number of clients: {fl_manager.num_clients}")
+        print(f"Batch size: {fl_manager.batch_size}")
         
-        print("Training with settings:", {
-            "num_clients": fl_manager.num_clients,
-            "batch_size": fl_manager.batch_size
-        })
-        
+        # Try to access client data to verify it's loaded
+        for client_id in range(fl_manager.num_clients):
+            client_data = fl_manager.data_handler.get_client_data(client_id)
+            print(f"Client {client_id} data shape: {client_data['x_train'].shape}")
+
+        print("Starting training round execution...")
         metrics = fl_manager.train_round()
         print("Training round completed successfully")
-        print("Metrics:", metrics)
+        print(f"Metrics: {metrics}")
+
+        return {
+            "status": "success",
+            "metrics": metrics,
+            "message": "Training round completed successfully"
+        }
         
-        return metrics
     except Exception as e:
-        print(f"Error during training: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error during training round: {str(e)}")
+        print(f"Error traceback: {error_details}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e),
+                "details": error_details
+            }
+        )
 
 @router.post("/update_privacy")
 async def update_privacy(config: PrivacyConfig) -> Dict[str, Any]:
