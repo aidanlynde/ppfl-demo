@@ -32,17 +32,25 @@ class MNISTDataHandler:
         self.num_classes = 10
     
     def load_and_preprocess_data(self) -> None:
-        """Load and preprocess the MNIST dataset."""
-        # Load MNIST data
+    """Load and preprocess a minimal subset of MNIST dataset."""
+    try:
+        # Load MNIST data with smaller chunks
         (x_train, y_train), (x_test, y_test) = mnist.load_data()
         
+        # Always use minimal dataset in production to save memory
+        x_train = x_train[:500]  # Use 500 samples instead of full dataset
+        y_train = y_train[:500]
+        x_test = x_test[:100]   # Use 100 test samples
+        y_test = y_test[:100]
+        
+        # If in test mode, use even smaller subset
         if self.test_mode:
-            # Use only a small subset of data for testing
-            x_train = x_train[:100]  # Use 1000 training samples
+            x_train = x_train[:100]
             y_train = y_train[:100]
-            x_test = x_test[:20]    # Use 200 test samples
+            x_test = x_test[:20]
             y_test = y_test[:20]
         
+        # Process in smaller chunks to save memory
         # Normalize and reshape data
         self.x_train = self._preprocess_features(x_train)
         self.x_test = self._preprocess_features(x_test)
@@ -51,12 +59,21 @@ class MNISTDataHandler:
         self.y_train = to_categorical(y_train, self.num_classes)
         self.y_test = to_categorical(y_test, self.num_classes)
         
-        # Split training data into train and validation sets
+        # Use smaller validation split
+        val_size = 0.1 if not self.test_mode else 0.2
         self.x_train, self.x_val, self.y_train, self.y_val = train_test_split(
             self.x_train, self.y_train,
-            test_size=self.validation_split,
+            test_size=val_size,
             random_state=42
         )
+        
+        # Force garbage collection after processing
+        import gc
+        gc.collect()
+        
+    except Exception as e:
+        print(f"Error loading data: {str(e)}")
+        raise
 
     def _preprocess_features(self, data: np.ndarray) -> np.ndarray:
         """Preprocess feature data."""
