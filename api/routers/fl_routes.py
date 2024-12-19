@@ -59,34 +59,44 @@ async def initialize_training(config: TrainingConfig):
         print(f"Error during initialization: {str(e)}")  # Debug log
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/test-train")
+async def test_train():
+    """Test endpoint with minimal processing."""
+    try:
+        print("Testing minimal training...")
+        return {
+            "status": "success",
+            "message": "Test training completed"
+        }
+    except Exception as e:
+        print(f"Test error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/train_round")
 async def train_round() -> Dict[str, Any]:
     """Execute one round of federated learning."""
     global fl_manager
     
-    if fl_manager is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Federated learning not initialized. Call /initialize first."
-        )
-    
     try:
+        print("Starting training round...")
+        if fl_manager is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Federated learning not initialized. Call /initialize first."
+            )
+        
+        print("Training with settings:", {
+            "num_clients": fl_manager.num_clients,
+            "batch_size": fl_manager.batch_size
+        })
+        
         metrics = fl_manager.train_round()
-        return {
-            "status": "success",
-            "round_number": metrics.round_number,
-            "client_metrics": metrics.client_metrics,
-            "global_metrics": metrics.global_metrics,
-            "privacy_metrics": {
-                "noise_scale": metrics.privacy_metrics.noise_scale,
-                "clip_norm": metrics.privacy_metrics.clip_norm,
-                "clipped_updates": metrics.privacy_metrics.clipped_updates,
-                "original_update_norms": metrics.privacy_metrics.original_update_norms,
-                "clipped_update_norms": metrics.privacy_metrics.clipped_update_norms
-            },
-            "privacy_budget": metrics.privacy_budget
-        }
+        print("Training round completed successfully")
+        print("Metrics:", metrics)
+        
+        return metrics
     except Exception as e:
+        print(f"Error during training: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/update_privacy")
