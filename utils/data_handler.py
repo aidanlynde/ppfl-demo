@@ -29,10 +29,10 @@ class MNISTDataHandler:
             (x_train, y_train), (x_test, y_test) = mnist.load_data()
             
             # Always use minimal dataset in production to save memory
-            x_train = x_train[:500]  # Use 500 samples instead of full dataset
-            y_train = y_train[:500]
-            x_test = x_test[:100]   # Use 100 test samples
-            y_test = y_test[:100]
+            x_train = x_train[:200]  
+            y_train = y_train[:200]
+            x_test = x_test[:50]   
+            y_test = y_test[:50]
             
             # If in test mode, use even smaller subset
             if self.test_mode:

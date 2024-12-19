@@ -113,20 +113,41 @@ class FederatedLearningManager:
     
     def _train_client(self, client_id: int) -> Dict[str, float]:
         """Train a single client for one round."""
-        client_data = self.data_handler.get_client_data(client_id)
-        client_model = self.client_models[client_id]
-        
-        x_train, y_train = client_data['x_train'], client_data['y_train']
-        metrics_history = []
-        
-        # Train for specified number of local epochs
-        for _ in range(self.local_epochs):
-            for i in range(0, len(x_train), self.batch_size):
-                batch_x = x_train[i:i + self.batch_size]
-                batch_y = y_train[i:i + self.batch_size]
-                metrics = client_model.train_on_batch(batch_x, batch_y)
-                metrics_history.append(metrics)
-        
+        try:
+            client_data = self.data_handler.get_client_data(client_id)
+            x_train, y_train = client_data['x_train'], client_data['y_train']
+            
+            # Use smaller chunks for training
+            chunk_size = 50  # Process only 50 samples at a time
+            total_loss = 0
+            total_accuracy = 0
+            num_chunks = 0
+            
+            for i in range(0, len(x_train), chunk_size):
+                chunk_x = x_train[i:i + chunk_size]
+                chunk_y = y_train[i:i + chunk_size]
+                
+                # Train on smaller batches within the chunk
+                for j in range(0, len(chunk_x), self.batch_size):
+                    batch_x = chunk_x[j:j + self.batch_size]
+                    batch_y = chunk_y[j:j + self.batch_size]
+                    loss, accuracy = self.client_models[client_id].train_on_batch(batch_x, batch_y)
+                    total_loss += loss
+                    total_accuracy += accuracy
+                    num_chunks += 1
+                    
+                # Force garbage collection after each chunk
+                import gc
+                gc.collect()
+                
+            return {
+                'loss': total_loss / max(num_chunks, 1),
+                'accuracy': total_accuracy / max(num_chunks, 1)
+            }
+            
+        except Exception as e:
+            print(f"Error training client {client_id}: {str(e)}")
+            raise
         # Calculate average metrics for this client
         avg_metrics = {
             'loss': np.mean([m[0] for m in metrics_history]),

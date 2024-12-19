@@ -27,16 +27,14 @@ ENV MPLBACKEND=Agg
 # Expose the port
 EXPOSE 8000
 
-# Command to run with memory optimizations
+# Command to run with increased timeout and memory optimizations
 CMD ["gunicorn", "api.main:app", \
      "--workers", "1", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8000", \
-     "--timeout", "120", \
+     "--timeout", "600", \
+     "--graceful-timeout", "300", \
+     "--keep-alive", "5", \
+     "--worker-connections", "20", \
      "--worker-tmp-dir", "/dev/shm", \
-     "--max-requests", "50", \
-     "--max-requests-jitter", "10", \
-     "--preload", \
-     "--worker-connections", "50", \
-     "--backlog", "50", \
-     "--keep-alive", "2"]
+     "--preload"]
