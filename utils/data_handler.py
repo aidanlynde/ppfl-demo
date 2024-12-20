@@ -24,45 +24,37 @@ class MNISTDataHandler:
         self.num_classes = 10
         
     def load_and_preprocess_data(self) -> None:
-        try:
-            # Load MNIST data
-            (x_train, y_train), (x_test, y_test) = mnist.load_data()
-            
-            # Always use minimal dataset in production to save memory
-            x_train = x_train[:200]  
-            y_train = y_train[:200]
-            x_test = x_test[:50]   
-            y_test = y_test[:50]
-            
-            # If in test mode, use even smaller subset
-            if self.test_mode:
-                x_train = x_train[:100]
-                y_train = y_train[:100]
-                x_test = x_test[:20]
-                y_test = y_test[:20]
-            
-            # Normalize and reshape data
-            self.x_train = self._preprocess_features(x_train)
-            self.x_test = self._preprocess_features(x_test)
-            
-            # Convert labels to categorical
-            self.y_train = to_categorical(y_train, self.num_classes)
-            self.y_test = to_categorical(y_test, self.num_classes)
-            
-            # Split training data into train and validation sets
-            self.x_train, self.x_val, self.y_train, self.y_val = train_test_split(
-                self.x_train, self.y_train,
-                test_size=self.validation_split,
-                random_state=42
-            )
-            
-            # Force garbage collection after processing
-            import gc
-            gc.collect()
-            
-        except Exception as e:
-            print(f"Error loading data: {str(e)}")
-            raise
+        """Load and preprocess the MNIST dataset."""
+        # Load MNIST data
+        (x_train, y_train), (x_test, y_test) = mnist.load_data()
+        
+        if self.test_mode:
+            # Use smaller dataset only for testing
+            x_train = x_train[:1000]
+            y_train = y_train[:1000]
+            x_test = x_test[:200]
+            y_test = y_test[:200]
+        else:
+            # Use substantial portion of dataset for real demo
+            x_train = x_train[:10000]  # Use 10,000 training samples
+            y_train = y_train[:10000]
+            x_test = x_test[:1000]    # Use 1,000 test samples
+            y_test = y_test[:1000]
+        
+        # Normalize and reshape data
+        self.x_train = self._preprocess_features(x_train)
+        self.x_test = self._preprocess_features(x_test)
+        
+        # Convert labels to categorical
+        self.y_train = to_categorical(y_train, self.num_classes)
+        self.y_test = to_categorical(y_test, self.num_classes)
+        
+        # Split training data into train and validation sets
+        self.x_train, self.x_val, self.y_train, self.y_val = train_test_split(
+            self.x_train, self.y_train,
+            test_size=self.validation_split,
+            random_state=42
+        )
             
     def _preprocess_features(self, data: np.ndarray) -> np.ndarray:
         """Preprocess feature data."""
