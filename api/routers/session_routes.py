@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter, HTTPException
 from typing import Dict
-from api.utils.session_manager import session_manager
+from ..utils.session_manager import session_manager
 
-router = APIRouter()
+router = APIRouter(prefix="/session", tags=["Session Management"])
 
 @router.post("/new")
 async def create_session() -> Dict[str, str]:

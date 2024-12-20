@@ -58,6 +58,8 @@ async def options_handler():
 
 # Include FL routes
 app.include_router(fl_router, prefix="/api/fl", tags=["Federated Learning"])
+app.include_router(session_routes.router, prefix="/api", tags=["Session Management"])
+
 
 @app.post("/test-init")
 async def test_initialize():
