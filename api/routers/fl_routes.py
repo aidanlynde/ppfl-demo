@@ -9,13 +9,6 @@ from ..utils.session_manager import session_manager
 
 router = APIRouter()
 
-# Global FL manager instance
-fl_manager = None
-
-def reset_fl_manager():
-    """Reset the global FL manager instance."""
-    global fl_manager
-    fl_manager = None
 
 class TrainingConfig(BaseModel):
     """Training configuration parameters."""
@@ -114,18 +107,20 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
         )
 
 @router.post("/update_privacy")
-async def update_privacy(config: PrivacyConfig) -> Dict[str, Any]:
+async def update_privacy(
+    config: PrivacyConfig,
+    x_session_id: Optional[str] = Header(None)
+) -> Dict[str, Any]:
     """Update privacy parameters."""
-    global fl_manager
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
     
-    if fl_manager is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Federated learning not initialized. Call /initialize first."
-        )
+    session = session_manager.get_session(x_session_id)
+    if not session or not session.fl_manager:
+        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
     
     try:
-        fl_manager.update_privacy_parameters(
+        session.fl_manager.update_privacy_parameters(
             noise_multiplier=config.noise_multiplier,
             l2_norm_clip=config.l2_norm_clip
         )
@@ -133,87 +128,82 @@ async def update_privacy(config: PrivacyConfig) -> Dict[str, Any]:
         return {
             "status": "success",
             "message": "Privacy parameters updated",
-            "current_metrics": fl_manager.get_privacy_metrics()
+            "current_metrics": session.fl_manager.get_privacy_metrics()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/metrics")
-async def get_metrics() -> Dict[str, Any]:
+async def get_metrics(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Get current training and privacy metrics."""
-    if fl_manager is None:  # This check needs to be at the very start
-        raise HTTPException(
-            status_code=400,
-            detail="Federated learning not initialized. Call /initialize first."
-        )
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
+    
+    session = session_manager.get_session(x_session_id)
+    if not session or not session.fl_manager:
+        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
     
     try:
-        if not hasattr(fl_manager, 'history'):  # Additional safety check
-            raise HTTPException(
-                status_code=400,
-                detail="Federated learning manager not properly initialized"
-            )
-            
         return {
             "status": "success",
-            "training_history": fl_manager.history,
-            "privacy_metrics": fl_manager.get_privacy_metrics()
+            "training_history": session.fl_manager.history,
+            "privacy_metrics": session.fl_manager.get_privacy_metrics()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/current_state")
-async def get_current_state() -> Dict[str, Any]:
+async def get_current_state(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Get current training state and configuration."""
-    global fl_manager
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
     
-    if fl_manager is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Federated learning not initialized"
-        )
+    session = session_manager.get_session(x_session_id)
+    if not session or not session.fl_manager:
+        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
     
     try:
         return {
             "status": "success",
-            "current_round": len(fl_manager.history['rounds']),
-            "total_rounds": fl_manager.rounds,
+            "current_round": len(session.fl_manager.history['rounds']),
+            "total_rounds": session.fl_manager.rounds,
             "privacy_settings": {
-                "noise_multiplier": fl_manager.privacy_mechanism.noise_multiplier,
-                "l2_norm_clip": fl_manager.privacy_mechanism.l2_norm_clip
+                "noise_multiplier": session.fl_manager.privacy_mechanism.noise_multiplier,
+                "l2_norm_clip": session.fl_manager.privacy_mechanism.l2_norm_clip
             },
-            "training_active": True if fl_manager else False,
-            "latest_accuracy": fl_manager.history['training_metrics'][-1].global_metrics['test_accuracy']
-            if fl_manager.history['training_metrics'] else None
+            "training_active": True if session.fl_manager else False,
+            "latest_accuracy": session.fl_manager.history['training_metrics'][-1].global_metrics['test_accuracy']
+            if session.fl_manager.history['training_metrics'] else None
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/client_info/{client_id}")
-async def get_client_info(client_id: int) -> ClientInfo:
+async def get_client_info(
+    client_id: int,
+    x_session_id: Optional[str] = Header(None)
+) -> ClientInfo:
     """Get detailed information about a specific client."""
-    global fl_manager
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
     
-    if fl_manager is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Federated learning not initialized"
-        )
+    session = session_manager.get_session(x_session_id)
+    if not session or not session.fl_manager:
+        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
     
     try:
-        client_data = fl_manager.data_handler.get_client_data(client_id)
+        client_data = session.fl_manager.data_handler.get_client_data(client_id)
         training_progress = [
             {
                 'round': i,
                 'accuracy': metrics.client_metrics[client_id]['accuracy'],
                 'loss': metrics.client_metrics[client_id]['loss']
             }
-            for i, metrics in enumerate(fl_manager.history['training_metrics'])
+            for i, metrics in enumerate(session.fl_manager.history['training_metrics'])
             if client_id in metrics.client_metrics
         ]
         
-        # Get privacy impact metrics for this client
-        privacy_metrics = fl_manager.history['privacy_metrics'][-1] if fl_manager.history['privacy_metrics'] else None
+        privacy_metrics = session.fl_manager.history['privacy_metrics'][-1] if session.fl_manager.history['privacy_metrics'] else None
         privacy_impact = {
             'updates_clipped': privacy_metrics.clipped_updates if privacy_metrics else 0,
             'original_norm': privacy_metrics.original_update_norms[client_id] if privacy_metrics else 0.0,
@@ -230,28 +220,27 @@ async def get_client_info(client_id: int) -> ClientInfo:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/reset")
-async def reset_training() -> Dict[str, Any]:
+async def reset_training(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Reset the training process while maintaining configuration."""
-    global fl_manager
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
     
-    if fl_manager is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Federated learning not initialized"
-        )
+    session = session_manager.get_session(x_session_id)
+    if not session or not session.fl_manager:
+        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
     
     try:
         # Store current configuration
         config = {
-            'num_clients': fl_manager.num_clients,
-            'local_epochs': fl_manager.local_epochs,
-            'batch_size': fl_manager.batch_size,
-            'noise_multiplier': fl_manager.privacy_mechanism.noise_multiplier,
-            'l2_norm_clip': fl_manager.privacy_mechanism.l2_norm_clip
+            'num_clients': session.fl_manager.num_clients,
+            'local_epochs': session.fl_manager.local_epochs,
+            'batch_size': session.fl_manager.batch_size,
+            'noise_multiplier': session.fl_manager.privacy_mechanism.noise_multiplier,
+            'l2_norm_clip': session.fl_manager.privacy_mechanism.l2_norm_clip
         }
         
         # Reinitialize with same configuration
-        fl_manager = PrivateFederatedLearningManager(**config)
+        session.fl_manager = PrivateFederatedLearningManager(**config)
         
         return {
             "status": "success",
