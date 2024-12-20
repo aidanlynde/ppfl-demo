@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
+from api.utils.session_manager import session_manager
 
 router = APIRouter()
 
@@ -37,19 +38,26 @@ class ClientInfo(BaseModel):
     privacy_impact: Dict[str, float]
 
 @router.post("/initialize")
-async def initialize_training(config: TrainingConfig):
+async def initialize_training(
+    config: TrainingConfig,
+    x_session_id: Optional[str] = Header(None)
+) -> Dict[str, Any]:
+    """Initialize the federated learning process."""
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
+    
+    session = session_manager.get_session(x_session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
     try:
-        print("Received initialization request with config:", config.dict())  # Debug log
-        
-        global fl_manager
-        fl_manager = PrivateFederatedLearningManager(
+        session.fl_manager = PrivateFederatedLearningManager(
             num_clients=config.num_clients,
             local_epochs=config.local_epochs,
             batch_size=config.batch_size,
             noise_multiplier=config.noise_multiplier,
             l2_norm_clip=config.l2_norm_clip
         )
-        print("FL Manager initialized successfully")  # Debug log
         
         return {
             "status": "success",
@@ -57,7 +65,6 @@ async def initialize_training(config: TrainingConfig):
             "config": config.dict()
         }
     except Exception as e:
-        print(f"Error during initialization: {str(e)}")  # Debug log
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/test-train")
@@ -74,37 +81,23 @@ async def test_train():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/train_round")
-async def train_round() -> Dict[str, Any]:
+async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Execute one round of federated learning."""
-    global fl_manager
+    if not x_session_id:
+        raise HTTPException(status_code=400, detail="No session ID provided")
     
-    print("=== Starting Training Round ===")
+    session = session_manager.get_session(x_session_id)
+    if not session or not session.fl_manager:
+        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
+    
     try:
-        if fl_manager is None:
-            print("Error: FL Manager is None")
-            raise HTTPException(
-                status_code=400,
-                detail="Federated learning not initialized"
-            )
-
-        print(f"Number of clients: {fl_manager.num_clients}")
-        print(f"Batch size: {fl_manager.batch_size}")
-        
-        # Try to access client data to verify it's loaded
-        for client_id in range(fl_manager.num_clients):
-            client_data = fl_manager.data_handler.get_client_data(client_id)
-            print(f"Client {client_id} data shape: {client_data['x_train'].shape}")
-
-        print("Starting training round execution...")
-        metrics = fl_manager.train_round()
-        print("Training round completed successfully")
-        print(f"Metrics: {metrics}")
-
+        metrics = session.fl_manager.train_round()
         return {
             "status": "success",
-            "metrics": metrics,
-            "message": "Training round completed successfully"
+            "metrics": metrics
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
         
     except Exception as e:
         import traceback

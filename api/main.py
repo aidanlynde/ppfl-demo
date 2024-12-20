@@ -6,6 +6,8 @@ from config.settings import settings
 from api.routers.fl_routes import router as fl_router
 from fastapi.responses import JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
+from api.utils.session_manager import session_manager
+import asyncio
 
 app = FastAPI(
     title="Privacy-Preserving Federated Learning Demo",
@@ -25,6 +27,15 @@ app.add_middleware(
 )
 # Add Gzip compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+async def cleanup_sessions():
+    while True:
+        await asyncio.sleep(300)  # Run every 5 minutes
+        session_manager.cleanup_expired_sessions()
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(cleanup_sessions())
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
@@ -54,7 +65,7 @@ async def test_initialize():
         "status": "success",
         "message": "Test initialization endpoint working"
     }
-    
+
 @app.get("/")
 async def root():
     """Root endpoint to verify API is running"""
