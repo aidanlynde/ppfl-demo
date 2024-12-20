@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
-from api.utils.session_manager import session_manager
+from ..utils.session_manager import session_manager
 
 router = APIRouter()
 
