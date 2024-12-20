@@ -7,6 +7,7 @@ from api.routers.fl_routes import router as fl_router
 from fastapi.responses import JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
 from api.utils.session_manager import session_manager
+from api.routers.session_routes import router as session_router
 import asyncio
 
 app = FastAPI(
