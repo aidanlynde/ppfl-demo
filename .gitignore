@@ -60,4 +60,5 @@ build/
 frontend/.next/
 frontend/out/
 frontend/build/
-frontend/node_modules/
+frontend/node_modules/storage/sessions/
+*.session

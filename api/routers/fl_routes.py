@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
 from ..utils.session_manager import session_manager
+from ..utils.retry import with_retry
 
 router = APIRouter()
 
@@ -74,6 +75,7 @@ async def test_train():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/train_round")
+@with_retry(max_retries=3)
 async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Execute one round of federated learning."""
     if not x_session_id:
@@ -134,6 +136,7 @@ async def update_privacy(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/metrics")
+@with_retry(max_retries=3)
 async def get_metrics(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Get current training and privacy metrics."""
     if not x_session_id:
