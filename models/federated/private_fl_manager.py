@@ -97,13 +97,15 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         return privacy_metrics
     
     def train_round(self) -> TrainingMetrics:
+        """
+        Execute one round of private federated learning.
+        
+        Returns:
+            TrainingMetrics containing round results
+        """
         try:
-            """
-            Execute one round of private federated learning.
-            
-            Returns:
-                TrainingMetrics containing round results
-            """
+            current_round = len(self.history['rounds'])
+
             # Distribute global model weights to all clients
             self._distribute_weights()
             
@@ -136,7 +138,7 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             
             # Create metrics for this round
             round_metrics = TrainingMetrics(
-                round_number=len(self.history['rounds']),
+                round_number=current_round,
                 client_metrics=client_metrics,
                 global_metrics=global_metrics,
                 privacy_metrics=privacy_metrics,
@@ -144,7 +146,7 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             )
             
             # Update history
-            self.history['rounds'].append(len(self.history['rounds']))
+            self.history['rounds'].append(current_round)
             self.history['training_metrics'].append(round_metrics)
             self.history['privacy_metrics'].append(privacy_metrics)
             self.history['privacy_budget'].append(privacy_budget)
@@ -231,18 +233,27 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
 
     def reset(self):
         """Reset training while maintaining configuration."""
-        config = {
-            'num_clients': self.num_clients,
-            'local_epochs': self.local_epochs,
-            'batch_size': self.batch_size,
-            'rounds': self.rounds,
-            'noise_multiplier': self.privacy_mechanism.noise_multiplier,  # Use current values
-            'l2_norm_clip': self.privacy_mechanism.l2_norm_clip,         # Use current values
-            'test_mode': self.test_mode
+        current_privacy_config = {
+            'noise_multiplier': self.privacy_mechanism.noise_multiplier,
+            'l2_norm_clip': self.privacy_mechanism.l2_norm_clip
         }
-        self.__init__(**config)
-        logger.info(f"Reset training with config: {config}")
-
-    def get_current_round(self) -> int:
-        """Get the current training round number."""
-        return len(self.history['rounds'])
+        
+        # Initialize with original config
+        super().__init__(
+            num_clients=self.num_clients,
+            local_epochs=self.local_epochs,
+            batch_size=self.batch_size,
+            rounds=self.rounds,
+            test_mode=self.test_mode
+        )
+        
+        # Restore privacy settings
+        self.update_privacy_parameters(**current_privacy_config)
+        
+        # Clear history
+        self.history = {
+            'rounds': [],
+            'training_metrics': [],
+            'privacy_metrics': [],
+            'privacy_budget': []
+        }
