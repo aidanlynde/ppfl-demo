@@ -223,3 +223,20 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def __setstate__(self, state):
         """Custom deserialization."""
         self.__dict__.update(state)
+
+    def reset(self):
+        """Reset training while maintaining configuration."""
+        config = {
+            'num_clients': self.num_clients,
+            'local_epochs': self.local_epochs,
+            'batch_size': self.batch_size,
+            'rounds': self.rounds,
+            'noise_multiplier': self.privacy_mechanism.noise_multiplier,
+            'l2_norm_clip': self.privacy_mechanism.l2_norm_clip,
+            'test_mode': self.test_mode
+        }
+        self.__init__(**config)
+
+    def get_current_round(self) -> int:
+        """Get the current training round number."""
+        return len(self.history['rounds'])

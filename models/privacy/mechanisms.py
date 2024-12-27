@@ -134,5 +134,7 @@ class PrivacyMechanism:
             noise_multiplier: New noise scale
             l2_norm_clip: New clipping threshold
         """
-        self.noise_multiplier = noise_multiplier
-        self.l2_norm_clip = l2_norm_clip
+        if noise_multiplier is not None:
+            self.noise_multiplier = float(noise_multiplier)
+        if l2_norm_clip is not None:
+            self.l2_norm_clip = float(l2_norm_clip)

@@ -313,48 +313,51 @@ async def get_client_info(
                 detail=f"Client {client_id} not found"
             )
         
-        training_progress = [
-            {
-                'round': i,
-                'accuracy': metrics.client_metrics[client_id]['accuracy'],
-                'loss': metrics.client_metrics[client_id]['loss']
+        # Get all training progress including history
+        training_progress = []
+        for round_num, metrics in enumerate(session.fl_manager.history['training_metrics']):
+            if client_id in metrics.client_metrics:
+                progress = {
+                    'round': round_num,
+                    'accuracy': float(metrics.client_metrics[client_id]['accuracy']),  # Ensure float
+                    'loss': float(metrics.client_metrics[client_id]['loss'])
+                }
+                training_progress.append(progress)
+
+        # Get latest privacy metrics with proper null handling
+        try:
+            privacy_metrics = session.fl_manager.history['privacy_metrics'][-1] if session.fl_manager.history['privacy_metrics'] else None
+            privacy_impact = {
+                'updates_clipped': float(privacy_metrics.clipped_updates) if privacy_metrics else 0.0,
+                'original_norm': float(privacy_metrics.original_update_norms[client_id]) 
+                    if privacy_metrics and client_id < len(privacy_metrics.original_update_norms) else 0.0,
+                'clipped_norm': float(privacy_metrics.clipped_update_norms[client_id])
+                    if privacy_metrics and client_id < len(privacy_metrics.clipped_update_norms) else 0.0
             }
-            for i, metrics in enumerate(session.fl_manager.history['training_metrics'])
-            if client_id in metrics.client_metrics
-        ]
+        except (IndexError, AttributeError) as e:
+            logger.warning(f"Error getting privacy metrics for client {client_id}: {str(e)}")
+            privacy_impact = {
+                'updates_clipped': 0.0,
+                'original_norm': 0.0,
+                'clipped_norm': 0.0
+            }
         
-        privacy_metrics = (
-            session.fl_manager.history['privacy_metrics'][-1]
-            if session.fl_manager.history.get('privacy_metrics') else None
-        )
-        
-        privacy_impact = {
-            'updates_clipped': privacy_metrics.clipped_updates if privacy_metrics else 0,
-            'original_norm': (
-                privacy_metrics.original_update_norms[client_id]
-                if privacy_metrics and client_id in privacy_metrics.original_update_norms
-                else 0.0
-            ),
-            'clipped_norm': (
-                privacy_metrics.clipped_update_norms[client_id]
-                if privacy_metrics and client_id in privacy_metrics.clipped_update_norms
-                else 0.0
-            )
-        }
+        # Get client's data size
+        data_size = len(client_data['x_train']) if client_data and 'x_train' in client_data else 0
         
         return ClientInfo(
             client_id=client_id,
-            data_size=len(client_data['x_train']),
+            data_size=data_size,
             training_progress=training_progress,
             privacy_impact=privacy_impact
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error getting client info: %s", str(e))
+        logger.error("Error getting client info: %s", str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=f"Error getting client info: {str(e)}"
         )
 
 @router.post("/reset")
