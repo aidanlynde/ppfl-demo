@@ -77,34 +77,34 @@ async def test_train():
 @router.post("/train_round")
 @with_retry(max_retries=3)
 async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
-    """Execute one round of federated learning."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session or not session.fl_manager:
-        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
-    
+    """Execute one round of federated learning with comprehensive error handling."""
     try:
+        session = validate_session(x_session_id)
+        
+        if not session.fl_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not initialized"
+            )
+        
+        logger.info("Starting training round for session %s", x_session_id)
         metrics = session.fl_manager.train_round()
+        
+        logger.info("Completed training round for session %s", x_session_id)
+        logger.debug("Training metrics: %s", metrics)
+        
         return {
             "status": "success",
             "metrics": metrics
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-        
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Error during training round: {str(e)}")
-        print(f"Error traceback: {error_details}")
+        logger.error("Error in training round: %s", str(e), exc_info=True)
         return JSONResponse(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "status": "error",
                 "message": str(e),
-                "details": error_details
+                "type": type(e).__name__
             }
         )
 
@@ -113,73 +113,115 @@ async def update_privacy(
     config: PrivacyConfig,
     x_session_id: Optional[str] = Header(None)
 ) -> Dict[str, Any]:
-    """Update privacy parameters."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session or not session.fl_manager:
-        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
-    
+    """Update privacy parameters with validation."""
     try:
+        session = validate_session(x_session_id)
+        
+        if not session.fl_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not initialized"
+            )
+        
         session.fl_manager.update_privacy_parameters(
             noise_multiplier=config.noise_multiplier,
             l2_norm_clip=config.l2_norm_clip
         )
         
+        current_metrics = session.fl_manager.get_privacy_metrics()
+        logger.info("Updated privacy parameters for session %s: %s", 
+                   x_session_id, current_metrics)
+        
         return {
             "status": "success",
             "message": "Privacy parameters updated",
-            "current_metrics": session.fl_manager.get_privacy_metrics()
+            "current_metrics": current_metrics
         }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error updating privacy parameters: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/metrics")
 @with_retry(max_retries=3)
-async def get_metrics(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
-    """Get current training and privacy metrics."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session or not session.fl_manager:
-        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
-    
+async def get_metrics(
+    x_session_id: Optional[str] = Header(None),
+    response: Response
+) -> Dict[str, Any]:
+    """Get current training and privacy metrics with caching."""
     try:
-        return {
+        session = validate_session(x_session_id)
+        
+        if not session.fl_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not initialized"
+            )
+        
+        metrics = {
             "status": "success",
             "training_history": session.fl_manager.history,
             "privacy_metrics": session.fl_manager.get_privacy_metrics()
         }
+        
+        # Add caching headers
+        response.headers["Cache-Control"] = "max-age=5"  # Cache for 5 seconds
+        
+        return metrics
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error getting metrics: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/current_state")
 async def get_current_state(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Get current training state and configuration."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session or not session.fl_manager:
-        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
-    
     try:
-        return {
+        session = validate_session(x_session_id)
+        
+        if not session.fl_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not initialized"
+            )
+        
+        current_round = len(session.fl_manager.history.get('rounds', []))
+        latest_metrics = session.fl_manager.history.get('training_metrics', [])
+        latest_accuracy = (
+            latest_metrics[-1].global_metrics.get('test_accuracy')
+            if latest_metrics else None
+        )
+        
+        state = {
             "status": "success",
-            "current_round": len(session.fl_manager.history['rounds']),
+            "current_round": current_round,
             "total_rounds": session.fl_manager.rounds,
             "privacy_settings": {
                 "noise_multiplier": session.fl_manager.privacy_mechanism.noise_multiplier,
                 "l2_norm_clip": session.fl_manager.privacy_mechanism.l2_norm_clip
             },
-            "training_active": True if session.fl_manager else False,
-            "latest_accuracy": session.fl_manager.history['training_metrics'][-1].global_metrics['test_accuracy']
-            if session.fl_manager.history['training_metrics'] else None
+            "training_active": bool(session.fl_manager),
+            "latest_accuracy": latest_accuracy
         }
+        
+        logger.debug("Current state for session %s: %s", x_session_id, state)
+        return state
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error getting current state: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/client_info/{client_id}")
 async def get_client_info(
@@ -187,15 +229,23 @@ async def get_client_info(
     x_session_id: Optional[str] = Header(None)
 ) -> ClientInfo:
     """Get detailed information about a specific client."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session or not session.fl_manager:
-        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
-    
     try:
-        client_data = session.fl_manager.data_handler.get_client_data(client_id)
+        session = validate_session(x_session_id)
+        
+        if not session.fl_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not initialized"
+            )
+        
+        try:
+            client_data = session.fl_manager.data_handler.get_client_data(client_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Client {client_id} not found"
+            )
+        
         training_progress = [
             {
                 'round': i,
@@ -206,11 +256,23 @@ async def get_client_info(
             if client_id in metrics.client_metrics
         ]
         
-        privacy_metrics = session.fl_manager.history['privacy_metrics'][-1] if session.fl_manager.history['privacy_metrics'] else None
+        privacy_metrics = (
+            session.fl_manager.history['privacy_metrics'][-1]
+            if session.fl_manager.history.get('privacy_metrics') else None
+        )
+        
         privacy_impact = {
             'updates_clipped': privacy_metrics.clipped_updates if privacy_metrics else 0,
-            'original_norm': privacy_metrics.original_update_norms[client_id] if privacy_metrics else 0.0,
-            'clipped_norm': privacy_metrics.clipped_update_norms[client_id] if privacy_metrics else 0.0
+            'original_norm': (
+                privacy_metrics.original_update_norms[client_id]
+                if privacy_metrics and client_id in privacy_metrics.original_update_norms
+                else 0.0
+            ),
+            'clipped_norm': (
+                privacy_metrics.clipped_update_norms[client_id]
+                if privacy_metrics and client_id in privacy_metrics.clipped_update_norms
+                else 0.0
+            )
         }
         
         return ClientInfo(
@@ -219,20 +281,27 @@ async def get_client_info(
             training_progress=training_progress,
             privacy_impact=privacy_impact
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error getting client info: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.post("/reset")
 async def reset_training(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     """Reset the training process while maintaining configuration."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session or not session.fl_manager:
-        raise HTTPException(status_code=401, detail="Invalid session or not initialized")
-    
     try:
+        session = validate_session(x_session_id)
+        
+        if not session.fl_manager:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not initialized"
+            )
+        
         # Store current configuration
         config = {
             'num_clients': session.fl_manager.num_clients,
@@ -245,13 +314,20 @@ async def reset_training(x_session_id: Optional[str] = Header(None)) -> Dict[str
         # Reinitialize with same configuration
         session.fl_manager = PrivateFederatedLearningManager(**config)
         
+        logger.info("Reset training for session %s with config: %s", 
+                   x_session_id, config)
+        
         return {
             "status": "success",
             "message": "Training reset successfully",
             "config": config
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error resetting training: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/explanations/{concept}")
 async def get_explanation(concept: str) -> Dict[str, Any]:
