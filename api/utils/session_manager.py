@@ -22,18 +22,19 @@ class Session:
         self.fl_manager: Optional[PrivateFederatedLearningManager] = None
     
     def to_dict(self) -> dict:
-        """Convert session to dictionary for persistence."""
         try:
             return {
                 'id': self.id,
                 'created': self.created,
                 'last_active': self.last_active,
-                'fl_manager': pickle.dumps(self.fl_manager)  # Serialize FL manager
+                'fl_manager': pickle.dumps(self.fl_manager)
             }
-
+        except Exception as e:
+            logger.error(f"Error serializing session: {e}")
+            return None
+    
     @classmethod
     def from_dict(cls, data: dict) -> 'Session':
-        """Create session from dictionary."""
         session = cls()
         session.id = data['id']
         session.created = data['created']
