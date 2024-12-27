@@ -236,11 +236,12 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             'local_epochs': self.local_epochs,
             'batch_size': self.batch_size,
             'rounds': self.rounds,
-            'noise_multiplier': self.privacy_mechanism.noise_multiplier,
-            'l2_norm_clip': self.privacy_mechanism.l2_norm_clip,
+            'noise_multiplier': self.privacy_mechanism.noise_multiplier,  # Use current values
+            'l2_norm_clip': self.privacy_mechanism.l2_norm_clip,         # Use current values
             'test_mode': self.test_mode
         }
         self.__init__(**config)
+        logger.info(f"Reset training with config: {config}")
 
     def get_current_round(self) -> int:
         """Get the current training round number."""

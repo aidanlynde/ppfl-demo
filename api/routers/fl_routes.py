@@ -198,6 +198,8 @@ async def update_privacy(
             noise_multiplier=config.noise_multiplier,
             l2_norm_clip=config.l2_norm_clip
         )
+
+        session_manager._persist_session(session)
         
         current_metrics = session.fl_manager.get_privacy_metrics()
         logger.info("Updated privacy parameters for session %s: %s", 
@@ -319,12 +321,12 @@ async def get_client_info(
         
         # Get all training progress including history
         training_progress = []
-        for round_num, metrics in enumerate(session.fl_manager.history['training_metrics']):
+        for metrics in session.fl_manager.history['training_metrics']:
             if client_id in metrics.client_metrics:
                 progress = {
-                    'round': round_num,
-                    'accuracy': float(metrics.client_metrics[client_id]['accuracy']),  # Ensure float
-                    'loss': float(metrics.client_metrics[client_id]['loss'])
+                    'round': metrics.round_number,
+                    'accuracy': metrics.client_metrics[client_id]['accuracy'],
+                    'loss': metrics.client_metrics[client_id]['loss']
                 }
                 training_progress.append(progress)
 
