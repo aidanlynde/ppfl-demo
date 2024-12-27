@@ -133,34 +133,35 @@ async def test_train() -> Dict[str, Any]:
 @router.post("/train_round")
 @with_retry(max_retries=3)
 async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
-    """Execute one round of federated learning with comprehensive error handling."""
     try:
         session = validate_session(x_session_id)
         
         if not session.fl_manager:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Training not initialized"
+                detail="Training not initialized - please initialize first"
             )
         
-        logger.info("Starting training round for session %s", x_session_id)
+        # Add state validation
+        if not session.fl_manager.is_ready_for_training():  # Add this method to FL manager
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training state is not valid - may need reinitialization"
+            )
+            
         metrics = session.fl_manager.train_round()
-        
-        logger.info("Completed training round for session %s", x_session_id)
-        logger.debug("Training metrics: %s", metrics)
-        
         return {
             "status": "success",
             "metrics": metrics
         }
     except Exception as e:
-        logger.error("Error in training round: %s", str(e), exc_info=True)
+        logger.error(f"Error in train_round: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "status": "error",
                 "message": str(e),
-                "type": type(e).__name__
+                "detail": "An error occurred during training"
             }
         )
 
