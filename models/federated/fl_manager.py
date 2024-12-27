@@ -148,13 +148,6 @@ class FederatedLearningManager:
         except Exception as e:
             print(f"Error training client {client_id}: {str(e)}")
             raise
-        # Calculate average metrics for this client
-        avg_metrics = {
-            'loss': np.mean([m[0] for m in metrics_history]),
-            'accuracy': np.mean([m[1] for m in metrics_history])
-        }
-        
-        return avg_metrics
     
     def _aggregate_weights(self) -> None:
         """Aggregate client weights using FedAvg algorithm."""

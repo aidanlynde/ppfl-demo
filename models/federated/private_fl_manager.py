@@ -224,12 +224,42 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
 
     def __getstate__(self):
         """Custom serialization."""
-        state = self.__dict__.copy()
-        return state
+        try:
+            state = self.__dict__.copy()
+            # Convert numpy arrays to lists for serialization
+            if 'client_models' in state:
+                state['client_models'] = {
+                    k: v.get_weights()
+                    for k, v in state['client_models'].items()
+                }
+            if 'global_model' in state:
+                state['global_model'] = self.global_model.get_weights()
+            logger.debug(f"Serializing state with keys: {state.keys()}")
+            return state
+        except Exception as e:
+            logger.error(f"Error in serialization: {str(e)}")
+            raise
 
     def __setstate__(self, state):
         """Custom deserialization."""
-        self.__dict__.update(state)
+        try:
+            # Restore models from weights
+            client_weights = state.pop('client_models', {})
+            global_weights = state.pop('global_model', None)
+            
+            self.__dict__.update(state)
+            
+            # Reinitialize models with saved weights
+            self._initialize_setup()
+            if global_weights is not None:
+                self.global_model.set_weights(global_weights)
+            for client_id, weights in client_weights.items():
+                self.client_models[client_id].set_weights(weights)
+                
+            logger.debug("Successfully deserialized state")
+        except Exception as e:
+            logger.error(f"Error in deserialization: {str(e)}")
+            raise
 
     def reset(self):
         """Reset training while maintaining configuration."""

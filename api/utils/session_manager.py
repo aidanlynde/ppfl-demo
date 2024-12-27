@@ -23,15 +23,16 @@ class Session:
     
     def to_dict(self) -> dict:
         try:
+            flm = pickle.dumps(self.fl_manager) if self.fl_manager is not None else None
             return {
                 'id': self.id,
                 'created': self.created,
                 'last_active': self.last_active,
-                'fl_manager': pickle.dumps(self.fl_manager)
+                'fl_manager': flm
             }
         except Exception as e:
             logger.error(f"Error serializing session: {e}")
-            return None
+            raise
     
     @classmethod
     def from_dict(cls, data: dict) -> 'Session':
@@ -112,21 +113,25 @@ class SessionManager:
         return session
     
     def _persist_session(self, session: Session) -> None:
-        """Save session to disk with proper error handling."""
+        """Save session to disk."""
         try:
+            session_dict = session.to_dict()
+            if session_dict is None:
+                logger.error("Session serialization failed")
+                return
+                
             file_path = self.storage_dir / f"{session.id}.session"
             with open(file_path, 'wb') as f:
-                pickle.dump(session.to_dict(), f)
-            logger.debug("Persisted session: %s", session.id)
+                pickle.dump(session_dict, f)
+                
+            # Verify persistence
+            if not file_path.exists():
+                logger.error(f"Session file not created: {file_path}")
+            else:
+                logger.debug(f"Successfully persisted session: {session.id}")
+                
         except Exception as e:
-            logger.error("Error saving session %s: %s", session.id, str(e))
-            # Attempt cleanup of potentially corrupted file
-            try:
-                file_path = self.storage_dir / f"{session.id}.session"
-                if file_path.exists():
-                    file_path.unlink()
-            except:
-                pass
+            logger.error(f"Error saving session {session.id}: {str(e)}")
     
     def _load_session(self, session_id: str) -> Optional[dict]:
         """Load session from disk with error handling."""
