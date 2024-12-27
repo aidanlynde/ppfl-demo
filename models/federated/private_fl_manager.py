@@ -97,58 +97,63 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         return privacy_metrics
     
     def train_round(self) -> TrainingMetrics:
-        """
-        Execute one round of private federated learning.
-        
-        Returns:
-            TrainingMetrics containing round results
-        """
-        # Distribute global model weights to all clients
-        self._distribute_weights()
-        
-        # Train each client locally
-        client_metrics = {}
-        client_weights = []
-        for client_id, client_model in self.client_models.items():
-            # Train client
-            metrics = self._train_client(client_id)
-            client_metrics[client_id] = metrics
+        try:
+            """
+            Execute one round of private federated learning.
             
-            # Collect weights
-            client_weights.append(client_model.get_weights())
+            Returns:
+                TrainingMetrics containing round results
+            """
+            # Distribute global model weights to all clients
+            self._distribute_weights()
             
-            # Update step count for privacy accounting
-            self.total_steps += self.local_epochs * (len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size)
-        
-        # Aggregate weights with privacy
-        privacy_metrics = self._aggregate_weights(client_weights)
-        
-        # Evaluate global model
-        global_metrics = self._evaluate_global_model()
-        
-        # Calculate privacy budget
-        privacy_budget = self.privacy_mechanism.get_privacy_spent(
-            num_steps=self.total_steps,
-            batch_size=self.batch_size,
-            dataset_size=len(self.data_handler.x_train)
-        )
-        
-        # Create metrics for this round
-        round_metrics = TrainingMetrics(
-            round_number=len(self.history['rounds']),
-            client_metrics=client_metrics,
-            global_metrics=global_metrics,
-            privacy_metrics=privacy_metrics,
-            privacy_budget=privacy_budget
-        )
-        
-        # Update history
-        self.history['rounds'].append(len(self.history['rounds']))
-        self.history['training_metrics'].append(round_metrics)
-        self.history['privacy_metrics'].append(privacy_metrics)
-        self.history['privacy_budget'].append(privacy_budget)
-        
-        return round_metrics
+            # Train each client locally
+            client_metrics = {}
+            client_weights = []
+            for client_id, client_model in self.client_models.items():
+                # Train client
+                metrics = self._train_client(client_id)
+                client_metrics[client_id] = metrics
+                
+                # Collect weights
+                client_weights.append(client_model.get_weights())
+                
+                # Update step count for privacy accounting
+                self.total_steps += self.local_epochs * (len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size)
+            
+            # Aggregate weights with privacy
+            privacy_metrics = self._aggregate_weights(client_weights)
+            
+            # Evaluate global model
+            global_metrics = self._evaluate_global_model()
+            
+            # Calculate privacy budget
+            privacy_budget = self.privacy_mechanism.get_privacy_spent(
+                num_steps=self.total_steps,
+                batch_size=self.batch_size,
+                dataset_size=len(self.data_handler.x_train)
+            )
+            
+            # Create metrics for this round
+            round_metrics = TrainingMetrics(
+                round_number=len(self.history['rounds']),
+                client_metrics=client_metrics,
+                global_metrics=global_metrics,
+                privacy_metrics=privacy_metrics,
+                privacy_budget=privacy_budget
+            )
+            
+            # Update history
+            self.history['rounds'].append(len(self.history['rounds']))
+            self.history['training_metrics'].append(round_metrics)
+            self.history['privacy_metrics'].append(privacy_metrics)
+            self.history['privacy_budget'].append(privacy_budget)
+            
+            return round_metrics
+
+        except Exception as e:
+            logger.error(f"Error in train_round: {str(e)}")
+            raise
     
     def update_privacy_parameters(
         self,

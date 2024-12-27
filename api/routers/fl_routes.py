@@ -152,6 +152,10 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
             )
             
         metrics = session.fl_manager.train_round()
+        
+        # Explicitly persist session after training
+        session_manager._persist_session(session)
+        
         return {
             "status": "success",
             "metrics": metrics
