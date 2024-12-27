@@ -201,3 +201,16 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
                 m.clipped_updates for m in self.history['privacy_metrics']
             ]
         }
+
+    def is_ready_for_training(self) -> bool:
+        """Check if manager is properly initialized and ready for training."""
+        try:
+            return (
+                self.data_handler is not None and
+                self.global_model is not None and
+                len(self.client_models) == self.num_clients and
+                self.privacy_mechanism is not None
+            )
+        except Exception as e:
+            logger.error(f"Error checking training readiness: {str(e)}")
+            return False
