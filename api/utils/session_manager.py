@@ -23,13 +23,14 @@ class Session:
     
     def to_dict(self) -> dict:
         """Convert session to dictionary for persistence."""
-        return {
-            'id': self.id,
-            'created': self.created,
-            'last_active': self.last_active,
-            'fl_manager': self.fl_manager
-        }
-    
+        try:
+            return {
+                'id': self.id,
+                'created': self.created,
+                'last_active': self.last_active,
+                'fl_manager': pickle.dumps(self.fl_manager)  # Serialize FL manager
+            }
+
     @classmethod
     def from_dict(cls, data: dict) -> 'Session':
         """Create session from dictionary."""
@@ -37,7 +38,7 @@ class Session:
         session.id = data['id']
         session.created = data['created']
         session.last_active = data['last_active']
-        session.fl_manager = data['fl_manager']
+        session.fl_manager = pickle.loads(data['fl_manager']) if data['fl_manager'] else None
         return session
 
 class SessionManager:

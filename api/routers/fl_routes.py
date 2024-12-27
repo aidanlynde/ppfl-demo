@@ -94,6 +94,9 @@ async def initialize_training(
             l2_norm_clip=config.l2_norm_clip
         )
         
+        # Explicitly persist session after initialization
+        session_manager._persist_session(session)
+        
         logger.info("Initialized FL training for session %s with config: %s", 
                    x_session_id, config.dict())
         

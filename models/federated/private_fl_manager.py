@@ -214,3 +214,12 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         except Exception as e:
             logger.error(f"Error checking training readiness: {str(e)}")
             return False
+
+    def __getstate__(self):
+        """Custom serialization."""
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        """Custom deserialization."""
+        self.__dict__.update(state)
