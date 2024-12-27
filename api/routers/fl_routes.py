@@ -137,24 +137,36 @@ async def test_train() -> Dict[str, Any]:
 @with_retry(max_retries=3)
 async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     try:
+        # First verify session exists and load it
         session = validate_session(x_session_id)
         
+        # Verify FL manager exists
         if not session.fl_manager:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Training not initialized - please initialize first"
             )
         
+        # Verify FL manager is ready
         if not session.fl_manager.is_ready_for_training():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Training not properly initialized"
-            )
+            # Try to reload session from disk
+            reloaded_session = session_manager._load_session(x_session_id)
+            if reloaded_session:
+                session = Session.from_dict(reloaded_session)
+                session_manager.sessions[x_session_id] = session
+                
+            if not session.fl_manager or not session.fl_manager.is_ready_for_training():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Training not properly initialized"
+                )
             
+        # Run training round
         metrics = session.fl_manager.train_round()
         
-        # Explicitly persist session after training
+        # Immediately persist updated session
         session_manager._persist_session(session)
+        logger.info(f"Completed training round for session {x_session_id}")
         
         return {
             "status": "success",
