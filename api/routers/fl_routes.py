@@ -142,11 +142,10 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
                 detail="Training not initialized - please initialize first"
             )
         
-        # Add state validation
-        if not session.fl_manager.is_ready_for_training():  # Add this method to FL manager
+        if not session.fl_manager.is_ready_for_training():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Training state is not valid - may need reinitialization"
+                detail="Training not properly initialized"
             )
             
         metrics = session.fl_manager.train_round()
@@ -154,6 +153,14 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
             "status": "success",
             "metrics": metrics
         }
+    except HTTPException as he:
+        return JSONResponse(
+            status_code=he.status_code,
+            content={
+                "status": "error",
+                "message": he.detail
+            }
+        )
     except Exception as e:
         logger.error(f"Error in train_round: {str(e)}", exc_info=True)
         return JSONResponse(
@@ -161,7 +168,7 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
             content={
                 "status": "error",
                 "message": str(e),
-                "detail": "An error occurred during training"
+                "detail": "Training failed - please check initialization status"
             }
         )
 
