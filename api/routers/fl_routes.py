@@ -1,28 +1,58 @@
 # api/routers/fl_routes.py
 
-from fastapi import APIRouter, HTTPException, Header
+import logging
+from fastapi import APIRouter, HTTPException, Header, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Dict, Any, Optional, List
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
 from ..utils.session_manager import session_manager
 from ..utils.retry import with_retry
 
-router = APIRouter()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+router = APIRouter(prefix="/fl", tags=["Federated Learning"])
 
 class TrainingConfig(BaseModel):
-    """Training configuration parameters."""
+    """Training configuration parameters with validation."""
     num_clients: int = 5
     local_epochs: int = 1
     batch_size: int = 32
     noise_multiplier: float = 1.0
     l2_norm_clip: float = 1.0
 
+    @validator('num_clients')
+    def validate_num_clients(cls, v):
+        if v < 2:
+            raise ValueError('Must have at least 2 clients')
+        if v > 100:
+            raise ValueError('Maximum 100 clients supported')
+        return v
+
+    @validator('batch_size')
+    def validate_batch_size(cls, v):
+        if v < 1:
+            raise ValueError('Batch size must be positive')
+        return v
+
 class PrivacyConfig(BaseModel):
-    """Privacy parameter updates."""
+    """Privacy parameter updates with validation."""
     noise_multiplier: Optional[float] = None
     l2_norm_clip: Optional[float] = None
+
+    @validator('noise_multiplier')
+    def validate_noise(cls, v):
+        if v is not None and v < 0:
+            raise ValueError('Noise multiplier must be non-negative')
+        return v
+
+    @validator('l2_norm_clip')
+    def validate_clip(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError('L2 norm clip must be positive')
+        return v
 
 class ClientInfo(BaseModel):
     """Client information for tooltips."""
@@ -31,20 +61,31 @@ class ClientInfo(BaseModel):
     training_progress: List[Dict[str, float]]
     privacy_impact: Dict[str, float]
 
-@router.post("/initialize")
+def validate_session(session_id: str):
+    """Validate session and return session object or raise HTTPException."""
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No session ID provided"
+        )
+    
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session"
+        )
+    return session
+
+@router.post("/initialize", status_code=status.HTTP_201_CREATED)
 async def initialize_training(
     config: TrainingConfig,
     x_session_id: Optional[str] = Header(None)
 ) -> Dict[str, Any]:
     """Initialize the federated learning process."""
-    if not x_session_id:
-        raise HTTPException(status_code=400, detail="No session ID provided")
-    
-    session = session_manager.get_session(x_session_id)
-    if not session:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    
     try:
+        session = validate_session(x_session_id)
+        
         session.fl_manager = PrivateFederatedLearningManager(
             num_clients=config.num_clients,
             local_epochs=config.local_epochs,
@@ -53,26 +94,41 @@ async def initialize_training(
             l2_norm_clip=config.l2_norm_clip
         )
         
+        logger.info("Initialized FL training for session %s with config: %s", 
+                   x_session_id, config.dict())
+        
         return {
             "status": "success",
             "message": "Federated learning initialized",
             "config": config.dict()
         }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error initializing training: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.post("/test-train")
-async def test_train():
+async def test_train() -> Dict[str, Any]:
     """Test endpoint with minimal processing."""
     try:
-        print("Testing minimal training...")
+        logger.info("Running test training...")
         return {
             "status": "success",
             "message": "Test training completed"
         }
     except Exception as e:
-        print(f"Test error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Test training error: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.post("/train_round")
 @with_retry(max_retries=3)
@@ -152,8 +208,8 @@ async def update_privacy(
 @router.get("/metrics")
 @with_retry(max_retries=3)
 async def get_metrics(
-    x_session_id: Optional[str] = Header(None),
-    response: Response
+    response: Response,
+    x_session_id: Optional[str] = Header(None)
 ) -> Dict[str, Any]:
     """Get current training and privacy metrics with caching."""
     try:
@@ -172,7 +228,7 @@ async def get_metrics(
         }
         
         # Add caching headers
-        response.headers["Cache-Control"] = "max-age=5"  # Cache for 5 seconds
+        response.headers["Cache-Control"] = "max-age=5"
         
         return metrics
     except Exception as e:
