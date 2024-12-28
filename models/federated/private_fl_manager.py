@@ -105,6 +105,9 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             TrainingMetrics containing round results
         """
         try:
+            if not self.validate_state():
+                raise ValueError("Invalid training state")
+
             current_round = len(self.history['rounds'])
 
             # Distribute global model weights to all clients
@@ -227,40 +230,74 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         """Custom serialization."""
         try:
             state = self.__dict__.copy()
-            # Convert numpy arrays to lists for serialization
+            # Handle client models
             if 'client_models' in state:
                 state['client_models'] = {
-                    k: v.get_weights()
+                    k: v.get_weights() if v is not None else None
                     for k, v in state['client_models'].items()
                 }
+            # Handle global model
             if 'global_model' in state:
-                state['global_model'] = self.global_model.get_weights()
-            logger.debug(f"Serializing state with keys: {state.keys()}")
+                state['global_model'] = (
+                    self.global_model.get_weights() 
+                    if self.global_model is not None else None
+                )
+            # Handle data handler
+            if 'data_handler' in state:
+                state.pop('data_handler')  # We'll reinitialize this
+                
+            logger.debug(f"Serializing state with keys: {list(state.keys())}")
             return state
         except Exception as e:
-            logger.error(f"Error in serialization: {str(e)}")
+            logger.error(f"Error in serialization: {str(e)}", exc_info=True)
             raise
 
     def __setstate__(self, state):
         """Custom deserialization."""
         try:
-            # Restore models from weights
+            # Extract model weights before update
             client_weights = state.pop('client_models', {})
             global_weights = state.pop('global_model', None)
             
+            # Update state
             self.__dict__.update(state)
             
-            # Reinitialize models with saved weights
+            # Reinitialize components
             self._initialize_setup()
+            
+            # Restore model weights
             if global_weights is not None:
                 self.global_model.set_weights(global_weights)
-            for client_id, weights in client_weights.items():
-                self.client_models[client_id].set_weights(weights)
                 
+            for client_id, weights in client_weights.items():
+                if weights is not None:
+                    self.client_models[client_id].set_weights(weights)
+                    
             logger.debug("Successfully deserialized state")
         except Exception as e:
-            logger.error(f"Error in deserialization: {str(e)}")
+            logger.error(f"Error in deserialization: {str(e)}", exc_info=True)
             raise
+    
+    def validate_state(self):
+        """Validate internal state consistency."""
+        try:
+            is_valid = (
+                self.data_handler is not None and
+                self.global_model is not None and
+                len(self.client_models) == self.num_clients and
+                self.privacy_mechanism is not None and
+                isinstance(self.history, dict) and
+                all(k in self.history for k in ['rounds', 'training_metrics', 'privacy_metrics', 'privacy_budget'])
+            )
+            
+            if not is_valid:
+                logger.warning("Invalid state detected during validation")
+                return False
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error validating state: {str(e)}")
+            return False
 
     def reset(self):
         """Reset training while maintaining configuration."""
@@ -269,19 +306,19 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             'l2_norm_clip': self.privacy_mechanism.l2_norm_clip
         }
         
-        # Initialize with original config
+        # Initialize with original config but include privacy settings
         super().__init__(
             num_clients=self.num_clients,
             local_epochs=self.local_epochs,
             batch_size=self.batch_size,
             rounds=self.rounds,
-            test_mode=self.test_mode
+            test_mode=self.test_mode,
+            noise_multiplier=current_privacy_config['noise_multiplier'],
+            l2_norm_clip=current_privacy_config['l2_norm_clip']
         )
         
-        # Restore privacy settings
-        self.update_privacy_parameters(**current_privacy_config)
-        
-        # Clear history
+        # Ensure history is cleared
+        self.total_steps = 0
         self.history = {
             'rounds': [],
             'training_metrics': [],

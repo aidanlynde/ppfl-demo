@@ -14,9 +14,7 @@ class FederatedLearningManager:
         local_epochs: int = 1,
         batch_size: int = 16,
         rounds: int = 10,
-        test_mode: bool = False,
-        noise_multiplier: float = 1.0,
-        l2_norm_clip: float = 1.0
+        test_mode: bool = False
     ):
         self.num_clients = num_clients
         self.local_epochs = local_epochs

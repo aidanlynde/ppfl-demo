@@ -277,23 +277,19 @@ async def get_current_state(x_session_id: Optional[str] = Header(None)) -> Dict[
                 detail="Training not initialized"
             )
         
-        current_round = len(session.fl_manager.history.get('rounds', []))
-        latest_metrics = session.fl_manager.history.get('training_metrics', [])
-        latest_accuracy = (
-            latest_metrics[-1].global_metrics.get('test_accuracy')
-            if latest_metrics else None
-        )
-        
         state = {
             "status": "success",
-            "current_round": current_round,
+            "current_round": len(session.fl_manager.history.get('rounds', [])),  # Should be 0 after reset
             "total_rounds": session.fl_manager.rounds,
             "privacy_settings": {
                 "noise_multiplier": session.fl_manager.privacy_mechanism.noise_multiplier,
                 "l2_norm_clip": session.fl_manager.privacy_mechanism.l2_norm_clip
             },
             "training_active": bool(session.fl_manager),
-            "latest_accuracy": latest_accuracy
+            "latest_accuracy": (
+                session.fl_manager.history.get('training_metrics', [])[-1].global_metrics.get('test_accuracy')
+                if session.fl_manager.history.get('training_metrics', []) else None
+            )
         }
         
         logger.debug("Current state for session %s: %s", x_session_id, state)
@@ -399,6 +395,7 @@ async def reset_training(x_session_id: Optional[str] = Header(None)) -> Dict[str
         
         # Reinitialize with same configuration
         session.fl_manager = PrivateFederatedLearningManager(**config)
+        session_manager._persist_session(session)
         
         logger.info("Reset training for session %s with config: %s", 
                    x_session_id, config)
