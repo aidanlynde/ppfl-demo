@@ -6,12 +6,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, validator
 from typing import Dict, Any, Optional, List
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
-from ..utils.session_manager import session_manager
+from ..utils.session_manager import session_manager, Session
 from ..utils.retry import with_retry
+from api.utils.logger_config import logger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/fl", tags=["Federated Learning"])
 

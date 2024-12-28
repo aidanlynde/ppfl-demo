@@ -7,10 +7,8 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 from pathlib import Path
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
+from api.utils.logger_config import logger
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class Session:
     """Represents a training session with associated FL manager."""
@@ -31,7 +29,7 @@ class Session:
                 'fl_manager': flm
             }
         except Exception as e:
-            logger.error(f"Error serializing session: {e}")
+            logger.error(f"Error serializing session: {str(e)}")
             raise
     
     @classmethod

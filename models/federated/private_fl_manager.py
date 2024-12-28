@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from models.federated.fl_manager import FederatedLearningManager
 from models.privacy.mechanisms import PrivacyMechanism, PrivacyMetrics
 from utils import MNISTDataHandler
+from api.utils.logger_config import logger
 
 @dataclass
 class TrainingMetrics:
