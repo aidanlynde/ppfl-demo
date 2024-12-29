@@ -52,7 +52,7 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         )
 
         self.current_round = 0
-
+        
         self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
         self.batch_size = 16 if test_mode else batch_size
         
@@ -99,74 +99,65 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         
         return privacy_metrics
     
-    @router.post("/train_round")
-    @with_retry(max_retries=3)
-    async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
+    def train_round(self) -> TrainingMetrics:
+        """Execute one round of private federated learning."""
         try:
-            logger.info(f"Starting train_round for session {x_session_id}")
+            if not self.validate_state():
+                raise ValueError("Invalid training state")
+
+
+            # Distribute global model weights to all clients
+            self._distribute_weights()
             
-            # First verify session exists and load it
-            session = validate_session(x_session_id)
-            
-            # Verify FL manager exists
-            if not session.fl_manager:
-                logger.error(f"FL manager not found in session {x_session_id}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Training not initialized - please initialize first"
-                )
-            
-            # Log current state before training
-            logger.info(f"Current round before training: {session.fl_manager.current_round}")
-            
-            # Verify FL manager is ready
-            if not session.fl_manager.is_ready_for_training():
-                logger.warning(f"FL manager not ready in session {x_session_id}, attempting reload")
-                # Try to reload session from disk
-                reloaded_session = session_manager._load_session(x_session_id)
-                if reloaded_session:
-                    session = Session.from_dict(reloaded_session)
-                    session_manager.sessions[x_session_id] = session
-                    logger.info("Successfully reloaded session from disk")
-                    
-                if not session.fl_manager or not session.fl_manager.is_ready_for_training():
-                    logger.error("Training not properly initialized even after reload attempt")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Training not properly initialized"
-                    )
+            # Train each client locally
+            client_metrics = {}
+            client_weights = []
+            for client_id, client_model in self.client_models.items():
+                # Train client
+                metrics = self._train_client(client_id)
+                client_metrics[client_id] = metrics
                 
-            # Run training round
-            metrics = session.fl_manager.train_round()
-            logger.info(f"Training completed, round after: {session.fl_manager.current_round}")
+                # Collect weights
+                client_weights.append(client_model.get_weights())
+                
+                # Update step count for privacy accounting
+                self.total_steps += self.local_epochs * (len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size)
             
-            # Immediately persist updated session
-            session_manager._persist_session(session)
-            logger.info(f"Session persisted after training round {session.fl_manager.current_round-1}")
+            # Aggregate weights with privacy
+            privacy_metrics = self._aggregate_weights(client_weights)
             
-            return {
-                "status": "success",
-                "metrics": metrics
-            }
-        except HTTPException as he:
-            logger.error(f"HTTP exception in train_round: {he.detail}")
-            return JSONResponse(
-                status_code=he.status_code,
-                content={
-                    "status": "error",
-                    "message": he.detail
-                }
+            # Evaluate global model
+            global_metrics = self._evaluate_global_model()
+            
+            # Calculate privacy budget
+            privacy_budget = self.privacy_mechanism.get_privacy_spent(
+                num_steps=self.total_steps,
+                batch_size=self.batch_size,
+                dataset_size=len(self.data_handler.x_train)
             )
+            
+            # Create metrics for this round using current_round
+            round_metrics = TrainingMetrics(
+                round_number=self.current_round,
+                client_metrics=client_metrics,
+                global_metrics=global_metrics,
+                privacy_metrics=privacy_metrics,
+                privacy_budget=privacy_budget
+            )
+            
+            # Update history
+            self.history['rounds'].append(self.current_round)
+            self.history['training_metrics'].append(round_metrics)
+            self.history['privacy_metrics'].append(privacy_metrics)
+            self.history['privacy_budget'].append(privacy_budget)
+            
+            self.current_round += 1
+            
+            return round_metrics
+
         except Exception as e:
-            logger.error(f"Error in train_round: {str(e)}", exc_info=True)
-            return JSONResponse(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={
-                    "status": "error",
-                    "message": str(e),
-                    "detail": "Training failed - please check initialization status"
-                }
-            )
+            logger.error(f"Error in train_round: {str(e)}")
+            raise
     
     def update_privacy_parameters(
         self,

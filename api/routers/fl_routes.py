@@ -136,14 +136,18 @@ async def test_train() -> Dict[str, Any]:
 async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, Any]:
     try:
         # First verify session exists and load it
+        logger.info(f"Starting train_round for session {x_session_id}")
         session = validate_session(x_session_id)
         
         # Verify FL manager exists
         if not session.fl_manager:
+            logger.error(f"FL manager not found for session {x_session_id}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Training not initialized - please initialize first"
             )
+        
+        logger.info(f"Current round before training: {session.fl_manager.current_round}")
         
         # Verify FL manager is ready
         if not session.fl_manager.is_ready_for_training():
@@ -389,8 +393,10 @@ async def reset_training(x_session_id: Optional[str] = Header(None)) -> Dict[str
             'num_clients': session.fl_manager.num_clients,
             'local_epochs': session.fl_manager.local_epochs,
             'batch_size': session.fl_manager.batch_size,
+            'rounds': session.fl_manager.rounds,  # Add rounds to config
             'noise_multiplier': session.fl_manager.privacy_mechanism.noise_multiplier,
-            'l2_norm_clip': session.fl_manager.privacy_mechanism.l2_norm_clip
+            'l2_norm_clip': session.fl_manager.privacy_mechanism.l2_norm_clip,
+            'test_mode': session.fl_manager.test_mode  # Add test_mode to config
         }
         
         # Reinitialize with same configuration
