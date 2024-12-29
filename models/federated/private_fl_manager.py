@@ -102,7 +102,10 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def train_round(self) -> TrainingMetrics:
         """Execute one round of private federated learning."""
         try:
+            logger.info(f"Starting training round {self.current_round}")
+
             if not self.validate_state():
+                logger.error("Invalid state detected before training")
                 raise ValueError("Invalid training state")
 
             # Distribute global model weights to all clients
@@ -252,11 +255,19 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
                     self.global_model.get_weights() 
                     if self.global_model is not None else None
                 )
-            # Handle data handler
+            # Store privacy mechanism state explicitly
+            if 'privacy_mechanism' in state:
+                state['privacy_mechanism_state'] = {
+                    'noise_multiplier': self.privacy_mechanism.noise_multiplier,
+                    'l2_norm_clip': self.privacy_mechanism.l2_norm_clip
+                }
+                state.pop('privacy_mechanism')
+            
+            # Remove data handler - will be reinitialized
             if 'data_handler' in state:
-                state.pop('data_handler')  # We'll reinitialize this
+                state.pop('data_handler')
                 
-            logger.debug(f"Serializing state with keys: {list(state.keys())}")
+            logger.info(f"Serializing state with keys: {list(state.keys())}")
             return state
         except Exception as e:
             logger.error(f"Error in serialization: {str(e)}", exc_info=True)
@@ -265,9 +276,10 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def __setstate__(self, state):
         """Custom deserialization."""
         try:
-            # Extract model weights before update
+            # Extract model weights and privacy state before update
             client_weights = state.pop('client_models', {})
             global_weights = state.pop('global_model', None)
+            privacy_state = state.pop('privacy_mechanism_state', None)
             
             # Update state
             self.__dict__.update(state)
@@ -280,10 +292,17 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
                 self.global_model.set_weights(global_weights)
                 
             for client_id, weights in client_weights.items():
-                if weights is not None:
+                if weights is not None and client_id in self.client_models:
                     self.client_models[client_id].set_weights(weights)
-                    
-            logger.debug("Successfully deserialized state")
+            
+            # Restore privacy mechanism state
+            if privacy_state:
+                self.privacy_mechanism.update_parameters(
+                    noise_multiplier=privacy_state['noise_multiplier'],
+                    l2_norm_clip=privacy_state['l2_norm_clip']
+                )
+                
+            logger.info("Successfully deserialized state")
         except Exception as e:
             logger.error(f"Error in deserialization: {str(e)}", exc_info=True)
             raise
