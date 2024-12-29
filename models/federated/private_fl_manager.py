@@ -31,6 +31,14 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         l2_norm_clip: float = 1.0,
         test_mode: bool = False
     ):
+        super().__init__(
+            num_clients=num_clients,
+            local_epochs=local_epochs,
+            batch_size=batch_size,
+            rounds=rounds,
+            test_mode=test_mode
+        )
+        
         # Initialize privacy mechanism
         self.privacy_mechanism = PrivacyMechanism(
             noise_multiplier=noise_multiplier,
@@ -47,17 +55,12 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             'privacy_metrics': [],
             'privacy_budget': []
         }
-
-        super().__init__(
-            num_clients=num_clients,
-            local_epochs=local_epochs,
-            batch_size=batch_size,
-            rounds=rounds,
-            test_mode=test_mode
-        )
         
-        self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
-        self.batch_size = 16 if test_mode else batch_size
+        if test_mode:
+            self.local_epochs = 1
+            self.batch_size = 16
+        
+        logger.info("PrivateFederatedLearningManager initialized successfully")
 
 
     def _initialize_setup(self) -> None:
@@ -117,50 +120,46 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def train_round(self) -> TrainingMetrics:
         """Execute one round of private federated learning."""
         try:
-            logger.info(f"Starting training round, current_round={self.current_round}")
-        
-            if not self.validate_state():
-                logger.error("Invalid state detected, attempting recovery")
-                try:
-                    self._initialize_setup()
-                    if not self.validate_state():
-                        raise ValueError("Training state invalid and recovery failed")
-                except Exception as e:
-                    logger.error(f"Recovery failed: {str(e)}")
-                    raise
-
-            # Distribute global model weights to all clients
+            if not self.is_ready_for_training():
+                raise ValueError("Training not properly initialized")
+                
+            logger.info(f"Starting training round {self.current_round}")
+            
+            # Distribute global model weights
             self._distribute_weights()
             
-            # Train each client locally
+            # Train each client
             client_metrics = {}
             client_weights = []
-            for client_id, client_model in self.client_models.items():
-                # Train client
-                metrics = self._train_client(client_id)
-                client_metrics[client_id] = metrics
-                
-                # Collect weights
-                client_weights.append(client_model.get_weights())
-                
-                # Update step count for privacy accounting
-                self.total_steps += self.local_epochs * (len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size)
             
-            # Aggregate weights with privacy
+            for client_id in range(self.num_clients):
+                try:
+                    metrics = self._train_client(client_id)
+                    client_metrics[client_id] = metrics
+                    client_weights.append(self.client_models[client_id].get_weights())
+                    
+                    # Update privacy step count
+                    client_data = self.data_handler.get_client_data(client_id)
+                    self.total_steps += self.local_epochs * (len(client_data['x_train']) // self.batch_size)
+                except Exception as e:
+                    logger.error(f"Error training client {client_id}: {str(e)}")
+                    raise
+            
+            # Apply privacy mechanisms and aggregate
             privacy_metrics = self._aggregate_weights(client_weights)
             
             # Evaluate global model
             global_metrics = self._evaluate_global_model()
             
-            # Calculate privacy budget
+            # Update privacy budget
             privacy_budget = self.privacy_mechanism.get_privacy_spent(
                 num_steps=self.total_steps,
                 batch_size=self.batch_size,
                 dataset_size=len(self.data_handler.x_train)
             )
             
-            # Create metrics for this round using current_round
-            round_metrics = TrainingMetrics(
+            # Create round metrics
+            metrics = TrainingMetrics(
                 round_number=self.current_round,
                 client_metrics=client_metrics,
                 global_metrics=global_metrics,
@@ -170,14 +169,15 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             
             # Update history
             self.history['rounds'].append(self.current_round)
-            self.history['training_metrics'].append(round_metrics)
+            self.history['training_metrics'].append(metrics)
             self.history['privacy_metrics'].append(privacy_metrics)
             self.history['privacy_budget'].append(privacy_budget)
             
             self.current_round += 1
+            logger.info(f"Completed training round {self.current_round - 1}")
             
-            return round_metrics
-
+            return metrics
+            
         except Exception as e:
             logger.error(f"Error in train_round: {str(e)}")
             raise
@@ -245,28 +245,24 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         }
 
     def is_ready_for_training(self) -> bool:
-        """Check if manager is properly initialized and ready for training."""
+        """Verify all components are properly initialized."""
         try:
-            basic_checks = (
-                self.data_handler is not None and
-                self.global_model is not None and
-                len(self.client_models) == self.num_clients and
-                self.privacy_mechanism is not None
-            )
+            checks = [
+                hasattr(self, 'data_handler') and self.data_handler is not None,
+                hasattr(self, 'global_model') and self.global_model is not None,
+                hasattr(self, 'client_models') and len(self.client_models) == self.num_clients,
+                all(model is not None for model in self.client_models.values()),
+                hasattr(self, 'privacy_mechanism') and self.privacy_mechanism is not None,
+                hasattr(self.privacy_mechanism, 'noise_multiplier'),
+                hasattr(self.privacy_mechanism, 'l2_norm_clip'),
+                isinstance(self.history, dict),
+                all(key in self.history for key in ['rounds', 'training_metrics', 'privacy_metrics', 'privacy_budget'])
+            ]
             
-            privacy_checks = (
-                hasattr(self.privacy_mechanism, 'noise_multiplier') and
-                hasattr(self.privacy_mechanism, 'l2_norm_clip')
-            )
-            
-            history_checks = isinstance(self.history, dict) and all(
-                k in self.history for k in ['rounds', 'training_metrics', 'privacy_metrics', 'privacy_budget']
-            )
-            
-            if not all([basic_checks, privacy_checks, history_checks]):
-                logger.error(f"Validation failed - Basic: {basic_checks}, Privacy: {privacy_checks}, History: {history_checks}")
+            if not all(checks):
+                logger.warning(f"Training readiness check failed: {checks}")
                 return False
-                
+            
             return True
             
         except Exception as e:

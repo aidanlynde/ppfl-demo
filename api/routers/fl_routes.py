@@ -23,10 +23,8 @@ class TrainingConfig(BaseModel):
 
     @validator('num_clients')
     def validate_num_clients(cls, v):
-        if v < 2:
-            raise ValueError('Must have at least 2 clients')
-        if v > 100:
-            raise ValueError('Maximum 100 clients supported')
+        if not 2 <= v <= 100:
+            raise ValueError('Number of clients must be between 2 and 100')
         return v
 
     @validator('batch_size')
@@ -91,6 +89,9 @@ async def initialize_training(
             noise_multiplier=config.noise_multiplier,
             l2_norm_clip=config.l2_norm_clip
         )
+
+        if not session.fl_manager.is_ready_for_training():
+            raise ValueError("FL manager failed initialization check")
         
         # Explicitly persist session after initialization
         session_manager._persist_session(session)
@@ -151,17 +152,11 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
         
         # Verify FL manager is ready
         if not session.fl_manager.is_ready_for_training():
-            # Try to reload session from disk
-            reloaded_session = session_manager._load_session(x_session_id)
-            if reloaded_session:
-                session = Session.from_dict(reloaded_session)
-                session_manager.sessions[x_session_id] = session
-                
-            if not session.fl_manager or not session.fl_manager.is_ready_for_training():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Training not properly initialized"
-                )
+            logger.error(f"FL manager not ready for training in session {x_session_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Training not properly initialized"
+            )
             
         # Run training round
         metrics = session.fl_manager.train_round()
@@ -174,22 +169,15 @@ async def train_round(x_session_id: Optional[str] = Header(None)) -> Dict[str, A
             "status": "success",
             "metrics": metrics
         }
-    except HTTPException as he:
-        return JSONResponse(
-            status_code=he.status_code,
-            content={
-                "status": "error",
-                "message": he.detail
-            }
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in train_round: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "status": "error",
-                "message": str(e),
-                "detail": "Training failed - please check initialization status"
+                "message": str(e)
             }
         )
 
