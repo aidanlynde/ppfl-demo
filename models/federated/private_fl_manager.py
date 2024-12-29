@@ -51,7 +51,6 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             test_mode=test_mode
         )
 
-        self.current_round = 0
         
         self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
         self.batch_size = 16 if test_mode else batch_size
@@ -102,11 +101,10 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def train_round(self) -> TrainingMetrics:
         """Execute one round of private federated learning."""
         try:
-            logger.info(f"Starting training round {self.current_round}")
-
             if not self.validate_state():
-                logger.error("Invalid state detected before training")
                 raise ValueError("Invalid training state")
+
+            current_round = len(self.history['rounds'])
 
             # Distribute global model weights to all clients
             self._distribute_weights()
@@ -123,9 +121,7 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
                 client_weights.append(client_model.get_weights())
                 
                 # Update step count for privacy accounting
-                self.total_steps += self.local_epochs * (
-                    len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size
-                )
+                self.total_steps += self.local_epochs * (len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size)
             
             # Aggregate weights with privacy
             privacy_metrics = self._aggregate_weights(client_weights)
@@ -142,7 +138,7 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             
             # Create metrics for this round using current_round
             round_metrics = TrainingMetrics(
-                round_number=self.current_round,
+                round_number=current_round,
                 client_metrics=client_metrics,
                 global_metrics=global_metrics,
                 privacy_metrics=privacy_metrics,
@@ -150,13 +146,11 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             )
             
             # Update history
-            self.history['rounds'].append(self.current_round)
+            self.history['rounds'].append(current_round)
             self.history['training_metrics'].append(round_metrics)
             self.history['privacy_metrics'].append(privacy_metrics)
             self.history['privacy_budget'].append(privacy_budget)
             
-            # Increment round counter after everything is done
-            self.current_round += 1
             
             return round_metrics
 
