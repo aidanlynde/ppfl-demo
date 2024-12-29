@@ -31,40 +31,15 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         l2_norm_clip: float = 1.0,
         test_mode: bool = False
     ):
-        """
-        Initialize the private federated learning manager.
-        
-        Args:
-            num_clients: Number of clients participating in training
-            local_epochs: Number of local training epochs per round
-            batch_size: Training batch size for each client
-            rounds: Number of federated learning rounds
-            noise_multiplier: Scale of noise for differential privacy
-            l2_norm_clip: Gradient clipping threshold
-            test_mode: Whether to use reduced dataset for testing
-        """
-        super().__init__(
-            num_clients=num_clients,
-            local_epochs=local_epochs,
-            batch_size=batch_size,
-            rounds=rounds,
-            test_mode=test_mode
-        )
-
-        self.current_round = 0
-        
-        self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
-        self.batch_size = 16 if test_mode else batch_size
-        
         # Initialize privacy mechanism
         self.privacy_mechanism = PrivacyMechanism(
             noise_multiplier=noise_multiplier,
             l2_norm_clip=l2_norm_clip
         )
-        
-        # Track total training steps for privacy accounting
+
+        self.current_round = 0
         self.total_steps = 0
-        
+
         # Enhanced training history with privacy metrics
         self.history = {
             'rounds': [],
@@ -72,7 +47,47 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             'privacy_metrics': [],
             'privacy_budget': []
         }
-    
+
+        super().__init__(
+            num_clients=num_clients,
+            local_epochs=local_epochs,
+            batch_size=batch_size,
+            rounds=rounds,
+            test_mode=test_mode
+        )
+        
+        self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
+        self.batch_size = 16 if test_mode else batch_size
+
+
+    def _initialize_setup(self) -> None:
+        """Initialize data handler and models."""
+        try:
+            # Store current privacy mechanism if it exists
+            if hasattr(self, 'privacy_mechanism'):
+                current_privacy = self.privacy_mechanism
+            else:
+                current_privacy = None
+            
+            # Call parent's initialize setup to handle models and data
+            super()._initialize_setup()
+            
+            # Restore privacy mechanism if it existed, otherwise create new one
+            if current_privacy is not None:
+                self.privacy_mechanism = current_privacy
+            else:
+                self.privacy_mechanism = PrivacyMechanism(
+                    noise_multiplier=1.0,
+                    l2_norm_clip=1.0
+                )
+                
+            logger.debug("Successfully initialized private FL setup")
+            
+        except Exception as e:
+            logger.error(f"Error in private FL _initialize_setup: {str(e)}")
+            raise
+
+
     def _aggregate_weights(self, client_weights: List[List[np.ndarray]]) -> None:
         """
         Aggregate weights using privacy mechanism.
@@ -102,9 +117,17 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def train_round(self) -> TrainingMetrics:
         """Execute one round of private federated learning."""
         try:
+            logger.info(f"Starting training round, current_round={self.current_round}")
+        
             if not self.validate_state():
-                raise ValueError("Invalid training state")
-
+                logger.error("Invalid state detected, attempting recovery")
+                try:
+                    self._initialize_setup()
+                    if not self.validate_state():
+                        raise ValueError("Training state invalid and recovery failed")
+                except Exception as e:
+                    logger.error(f"Recovery failed: {str(e)}")
+                    raise
 
             # Distribute global model weights to all clients
             self._distribute_weights()
@@ -224,12 +247,28 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def is_ready_for_training(self) -> bool:
         """Check if manager is properly initialized and ready for training."""
         try:
-            return (
+            basic_checks = (
                 self.data_handler is not None and
                 self.global_model is not None and
                 len(self.client_models) == self.num_clients and
                 self.privacy_mechanism is not None
             )
+            
+            privacy_checks = (
+                hasattr(self.privacy_mechanism, 'noise_multiplier') and
+                hasattr(self.privacy_mechanism, 'l2_norm_clip')
+            )
+            
+            history_checks = isinstance(self.history, dict) and all(
+                k in self.history for k in ['rounds', 'training_metrics', 'privacy_metrics', 'privacy_budget']
+            )
+            
+            if not all([basic_checks, privacy_checks, history_checks]):
+                logger.error(f"Validation failed - Basic: {basic_checks}, Privacy: {privacy_checks}, History: {history_checks}")
+                return False
+                
+            return True
+            
         except Exception as e:
             logger.error(f"Error checking training readiness: {str(e)}")
             return False
@@ -238,6 +277,12 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         """Custom serialization."""
         try:
             state = self.__dict__.copy()
+
+            required_attrs = ['current_round', 'total_steps', 'privacy_mechanism', 'history']
+            missing = [attr for attr in required_attrs if not hasattr(self, attr)]
+            if missing:
+                raise ValueError(f"Missing required attributes: {missing}")
+
             # Handle client models
             if 'client_models' in state:
                 state['client_models'] = {
@@ -269,34 +314,38 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             raise
 
     def __setstate__(self, state):
-        """Custom deserialization."""
         try:
-            # Extract model weights and privacy state before update
+            # Extract states first
             client_weights = state.pop('client_models', {})
             global_weights = state.pop('global_model', None)
             privacy_state = state.pop('privacy_mechanism_state', None)
             
+            # First create privacy mechanism with privacy state values (not default values)
+            if privacy_state:
+                self.privacy_mechanism = PrivacyMechanism(
+                    noise_multiplier=privacy_state['noise_multiplier'],
+                    l2_norm_clip=privacy_state['l2_norm_clip']
+                )
+            else:
+                self.privacy_mechanism = PrivacyMechanism(
+                    noise_multiplier=1.0,
+                    l2_norm_clip=1.0
+                )
+
             # Update state
             self.__dict__.update(state)
             
-            # Reinitialize components
+            # Setup after state is updated
             self._initialize_setup()
             
             # Restore model weights
             if global_weights is not None:
                 self.global_model.set_weights(global_weights)
-                
+                    
             for client_id, weights in client_weights.items():
                 if weights is not None and client_id in self.client_models:
                     self.client_models[client_id].set_weights(weights)
-            
-            # Restore privacy mechanism state
-            if privacy_state:
-                self.privacy_mechanism.update_parameters(
-                    noise_multiplier=privacy_state['noise_multiplier'],
-                    l2_norm_clip=privacy_state['l2_norm_clip']
-                )
-                
+                    
             logger.info("Successfully deserialized state")
         except Exception as e:
             logger.error(f"Error in deserialization: {str(e)}", exc_info=True)
@@ -305,6 +354,9 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
     def validate_state(self):
         """Validate internal state consistency."""
         try:
+            if not self._validate_privacy_state():
+                return False
+
             is_valid = (
                 self.data_handler is not None and
                 self.global_model is not None and
@@ -323,8 +375,29 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             logger.error(f"Error validating state: {str(e)}")
             return False
 
+    def _validate_privacy_state(self) -> bool:
+        """Validate privacy mechanism state."""
+        try:
+            if not hasattr(self, 'privacy_mechanism'):
+                logger.error("No privacy mechanism found")
+                return False
+                
+            required_attrs = ['noise_multiplier', 'l2_norm_clip']
+            for attr in required_attrs:
+                if not hasattr(self.privacy_mechanism, attr):
+                    logger.error(f"Privacy mechanism missing attribute: {attr}")
+                    return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error validating privacy state: {str(e)}")
+            return False
+
     def reset(self):
         try:
+            if not hasattr(self, 'privacy_mechanism'):
+                raise ValueError("Cannot reset: privacy mechanism not initialized")
+            
             # Store current configuration
             config = {
                 'num_clients': self.num_clients,
