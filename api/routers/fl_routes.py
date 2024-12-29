@@ -90,6 +90,8 @@ async def initialize_training(
             l2_norm_clip=config.l2_norm_clip
         )
 
+        session.fl_manager._initialize_setup()
+
         if not session.fl_manager.is_ready_for_training():
             raise ValueError("FL manager failed initialization check")
         
