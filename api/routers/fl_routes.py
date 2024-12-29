@@ -11,7 +11,7 @@ from ..utils.retry import with_retry
 from api.utils.logger_config import logger
 
 
-router = APIRouter(prefix="/fl", tags=["Federated Learning"])
+router = APIRouter(tags=["Federated Learning"])
 
 class TrainingConfig(BaseModel):
     """Training configuration parameters with validation."""
@@ -279,7 +279,7 @@ async def get_current_state(x_session_id: Optional[str] = Header(None)) -> Dict[
         
         state = {
             "status": "success",
-            "current_round": len(session.fl_manager.history.get('rounds', [])),  # Should be 0 after reset
+            "current_round": session.fl_manager.current_round,
             "total_rounds": session.fl_manager.rounds,
             "privacy_settings": {
                 "noise_multiplier": session.fl_manager.privacy_mechanism.noise_multiplier,

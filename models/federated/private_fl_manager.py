@@ -50,6 +50,8 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             rounds=rounds,
             test_mode=test_mode
         )
+
+        self.current_round = 0
         
         self.local_epochs = 1 if test_mode else local_epochs  # Always use 1 epoch in test mode
         self.batch_size = 16 if test_mode else batch_size
@@ -98,17 +100,10 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
         return privacy_metrics
     
     def train_round(self) -> TrainingMetrics:
-        """
-        Execute one round of private federated learning.
-        
-        Returns:
-            TrainingMetrics containing round results
-        """
+        """Execute one round of private federated learning."""
         try:
             if not self.validate_state():
                 raise ValueError("Invalid training state")
-
-            current_round = len(self.history['rounds'])
 
             # Distribute global model weights to all clients
             self._distribute_weights()
@@ -125,7 +120,9 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
                 client_weights.append(client_model.get_weights())
                 
                 # Update step count for privacy accounting
-                self.total_steps += self.local_epochs * (len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size)
+                self.total_steps += self.local_epochs * (
+                    len(self.data_handler.get_client_data(client_id)['x_train']) // self.batch_size
+                )
             
             # Aggregate weights with privacy
             privacy_metrics = self._aggregate_weights(client_weights)
@@ -140,9 +137,9 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
                 dataset_size=len(self.data_handler.x_train)
             )
             
-            # Create metrics for this round
+            # Create metrics for this round using current_round
             round_metrics = TrainingMetrics(
-                round_number=current_round,
+                round_number=self.current_round,
                 client_metrics=client_metrics,
                 global_metrics=global_metrics,
                 privacy_metrics=privacy_metrics,
@@ -150,10 +147,13 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             )
             
             # Update history
-            self.history['rounds'].append(current_round)
+            self.history['rounds'].append(self.current_round)
             self.history['training_metrics'].append(round_metrics)
             self.history['privacy_metrics'].append(privacy_metrics)
             self.history['privacy_budget'].append(privacy_budget)
+            
+            # Increment round counter after everything is done
+            self.current_round += 1
             
             return round_metrics
 
@@ -173,14 +173,24 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             noise_multiplier: New noise scale (optional)
             l2_norm_clip: New clipping threshold (optional)
         """
-        if noise_multiplier is not None or l2_norm_clip is not None:
-            current_noise = self.privacy_mechanism.noise_multiplier
-            current_clip = self.privacy_mechanism.l2_norm_clip
-            
-            self.privacy_mechanism.update_parameters(
-                noise_multiplier=noise_multiplier if noise_multiplier is not None else current_noise,
-                l2_norm_clip=l2_norm_clip if l2_norm_clip is not None else current_clip
-            )
+        try:
+            if noise_multiplier is not None or l2_norm_clip is not None:
+                logger.info(f"Updating privacy parameters: noise={noise_multiplier}, clip={l2_norm_clip}")
+                
+                # Get current values for any parameter not being updated
+                current_noise = self.privacy_mechanism.noise_multiplier
+                current_clip = self.privacy_mechanism.l2_norm_clip
+                
+                # Update with new or current values
+                self.privacy_mechanism.update_parameters(
+                    noise_multiplier=noise_multiplier if noise_multiplier is not None else current_noise,
+                    l2_norm_clip=l2_norm_clip if l2_norm_clip is not None else current_clip
+                )
+                
+                logger.info(f"Updated privacy parameters: noise={self.privacy_mechanism.noise_multiplier}, clip={self.privacy_mechanism.l2_norm_clip}")
+        except Exception as e:
+            logger.error(f"Error updating privacy parameters: {str(e)}")
+            raise
     
     def get_privacy_metrics(self) -> Dict[str, Any]:
         """
@@ -300,28 +310,40 @@ class PrivateFederatedLearningManager(FederatedLearningManager):
             return False
 
     def reset(self):
-        """Reset training while maintaining configuration."""
-        current_privacy_config = {
-            'noise_multiplier': self.privacy_mechanism.noise_multiplier,
-            'l2_norm_clip': self.privacy_mechanism.l2_norm_clip
-        }
-        
-        # Initialize with original config but include privacy settings
-        super().__init__(
-            num_clients=self.num_clients,
-            local_epochs=self.local_epochs,
-            batch_size=self.batch_size,
-            rounds=self.rounds,
-            test_mode=self.test_mode,
-            noise_multiplier=current_privacy_config['noise_multiplier'],
-            l2_norm_clip=current_privacy_config['l2_norm_clip']
-        )
-        
-        # Ensure history is cleared
-        self.total_steps = 0
-        self.history = {
-            'rounds': [],
-            'training_metrics': [],
-            'privacy_metrics': [],
-            'privacy_budget': []
-        }
+        try:
+            # Store current configuration
+            config = {
+                'num_clients': self.num_clients,
+                'local_epochs': self.local_epochs,
+                'batch_size': self.batch_size,
+                'rounds': self.rounds,
+                'noise_multiplier': self.privacy_mechanism.noise_multiplier,  # This is correct
+                'l2_norm_clip': self.privacy_mechanism.l2_norm_clip,         # This is correct
+                'test_mode': self.test_mode
+            }
+            
+            # Need to store these before reinitializing
+            current_noise = self.privacy_mechanism.noise_multiplier
+            current_clip = self.privacy_mechanism.l2_norm_clip
+            
+            # Reinitialize models and data
+            self._initialize_setup()
+            
+            # Reset training state
+            self.current_round = 0
+            self.total_steps = 0
+            self.history = {
+                'rounds': [],
+                'training_metrics': [],
+                'privacy_metrics': [],
+                'privacy_budget': []
+            }
+            
+            # Restore privacy configuration using stored values
+            self.privacy_mechanism.update_parameters(
+                noise_multiplier=current_noise,
+                l2_norm_clip=current_clip
+            )
+        except Exception as e:
+            logger.error(f"Error in reset: {str(e)}")
+            raise

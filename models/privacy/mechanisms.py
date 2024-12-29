@@ -35,67 +35,63 @@ class PrivacyMechanism:
         return np.sqrt(squared_sum)
     
     def apply_privacy(self, 
-                     model_updates: List[List[np.ndarray]], 
-                     batch_size: int) -> Tuple[List[np.ndarray], PrivacyMetrics]:
-        """
-        Apply privacy mechanisms to model updates.
-        
-        Args:
-            model_updates: List of weight updates from each client
-            batch_size: Size of training batch (for noise scaling)
+                    model_updates: List[List[np.ndarray]], 
+                    batch_size: int) -> Tuple[List[np.ndarray], PrivacyMetrics]:
+        """Apply privacy mechanisms to model updates."""
+        try:
+            # Track metrics for visualization
+            original_norms = []
+            clipped_norms = []
+            num_clipped = 0
             
-        Returns:
-            Tuple of (private_aggregate, privacy_metrics)
-        """
-        # Track metrics for visualization
-        original_norms = []
-        clipped_norms = []
-        num_clipped = 0
-        
-        # Clip gradients
-        clipped_updates = []
-        for update in model_updates:
-            original_norm = self.compute_update_norm(update)
-            original_norms.append(float(original_norm))
-            
-            # Determine if clipping is needed (with numerical tolerance)
-            needs_clipping = original_norm > self.l2_norm_clip * (1 + 1e-6)
-            if needs_clipping:
-                num_clipped += 1
-                scaling_factor = self.l2_norm_clip / original_norm
-            else:
-                scaling_factor = 1.0
+            # Clip gradients using current l2_norm_clip
+            clipped_updates = []
+            for update in model_updates:
+                original_norm = self.compute_update_norm(update)
+                original_norms.append(float(original_norm))
                 
-            clipped_update = [w * scaling_factor for w in update]
-            clipped_norm = self.compute_update_norm(clipped_update)
-            clipped_norms.append(float(clipped_norm))
+                # Determine if clipping is needed
+                needs_clipping = original_norm > self.l2_norm_clip * (1 + 1e-6)
+                if needs_clipping:
+                    num_clipped += 1
+                    scaling_factor = self.l2_norm_clip / original_norm
+                else:
+                    scaling_factor = 1.0
+                    
+                clipped_update = [w * scaling_factor for w in update]
+                clipped_norm = self.compute_update_norm(clipped_update)
+                clipped_norms.append(float(clipped_norm))
+                
+                clipped_updates.append(clipped_update)
             
-            clipped_updates.append(clipped_update)
-        
-        # Average the updates
-        num_clients = len(model_updates)
-        averaged_update = [
-            sum(update[i] for update in clipped_updates) / num_clients
-            for i in range(len(clipped_updates[0]))
-        ]
-        
-        # Add noise
-        noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
-        noised_update = [
-            param + np.random.normal(0, noise_stddev, param.shape)
-            for param in averaged_update
-        ]
-        
-        # Collect metrics
-        metrics = PrivacyMetrics(
-            noise_scale=noise_stddev,
-            clip_norm=self.l2_norm_clip,
-            clipped_updates=num_clipped,
-            original_update_norms=original_norms,
-            clipped_update_norms=clipped_norms
-        )
-        
-        return noised_update, metrics
+            # Average the updates
+            num_clients = len(model_updates)
+            averaged_update = [
+                sum(update[i] for update in clipped_updates) / num_clients
+                for i in range(len(clipped_updates[0]))
+            ]
+            
+            # Add noise using current noise_multiplier
+            noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
+            noised_update = [
+                param + np.random.normal(0, noise_stddev, param.shape)
+                for param in averaged_update
+            ]
+            
+            # Collect metrics
+            metrics = PrivacyMetrics(
+                noise_scale=noise_stddev,
+                clip_norm=self.l2_norm_clip,
+                clipped_updates=num_clipped,
+                original_update_norms=original_norms,
+                clipped_update_norms=clipped_norms
+            )
+            
+            return noised_update, metrics
+            
+        except Exception as e:
+            logger.error(f"Error applying privacy mechanisms: {str(e)}")
+            raise   
     
     def get_privacy_spent(self, num_steps: int, batch_size: int, dataset_size: int) -> Dict[str, float]:
         """
@@ -138,3 +134,10 @@ class PrivacyMechanism:
             self.noise_multiplier = float(noise_multiplier)
         if l2_norm_clip is not None:
             self.l2_norm_clip = float(l2_norm_clip)
+        
+        # Force update of noise scale
+        self._update_noise_scale()
+
+    def _update_noise_scale(self):
+        """Update internal noise scale based on current parameters."""
+        self.noise_scale = self.noise_multiplier * self.l2_norm_clip
