@@ -1,178 +1,210 @@
-# api/utils/session_manager.py
-
+import os
 import uuid
 import pickle
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Optional
-from pathlib import Path
+from typing import Optional, Dict
+
+from sqlalchemy import create_engine, text
+
 from models.federated.private_fl_manager import PrivateFederatedLearningManager
 from api.utils.logger_config import logger
 
-
 class Session:
-    """Represents a training session with associated FL manager."""
-    
+    """
+    Represents a training session with associated FL manager.
+    We store this in the database by pickling the entire object.
+    """
     def __init__(self):
         self.id: str = str(uuid.uuid4())
         self.created: datetime = datetime.now()
         self.last_active: datetime = datetime.now()
         self.fl_manager: Optional[PrivateFederatedLearningManager] = None
-    
+
     def to_dict(self) -> dict:
-        try:
-            flm = pickle.dumps(self.fl_manager) if self.fl_manager is not None else None
-            return {
-                'id': self.id,
-                'created': self.created,
-                'last_active': self.last_active,
-                'fl_manager': flm
-            }
-        except Exception as e:
-            logger.error(f"Error serializing session: {str(e)}")
-            raise
-    
+        """Convert this Session into a dict of primitive data + a pickle of fl_manager."""
+        return {
+            'id': self.id,
+            'created': self.created,
+            'last_active': self.last_active,
+            # We store the fl_manager as a separate pickle so we can nest it inside.
+            'fl_manager': pickle.dumps(self.fl_manager) if self.fl_manager else None
+        }
+
     @classmethod
     def from_dict(cls, data: dict) -> 'Session':
-        session = cls()
-        session.id = data['id']
-        session.created = data['created']
-        session.last_active = data['last_active']
-        session.fl_manager = pickle.loads(data['fl_manager']) if data['fl_manager'] else None
-        return session
+        """Create a Session object from a dict that was originally produced by to_dict()."""
+        s = cls()
+        s.id = data['id']
+        s.created = data['created']
+        s.last_active = data['last_active']
+        if data['fl_manager'] is not None:
+            s.fl_manager = pickle.loads(data['fl_manager'])
+        return s
 
 class SessionManager:
-    """Manages training sessions with persistence and cleanup."""
-    
-    def __init__(self, session_timeout: int = 30):
-        self.sessions: Dict[str, Session] = {}
-        self.session_timeout = timedelta(minutes=session_timeout)
-        self.storage_dir = Path("storage/sessions")
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
-        self._load_persisted_sessions()
-        logger.info("SessionManager initialized with timeout: %d minutes", session_timeout)
-    
-    def _load_persisted_sessions(self) -> None:
-        """Load valid sessions from disk with error handling."""
-        loaded = 0
-        errors = 0
-        for file in self.storage_dir.glob("*.session"):
-            try:
-                with open(file, 'rb') as f:
-                    session_data = pickle.load(f)
-                    if not self._is_session_expired(session_data['last_active']):
-                        session = Session.from_dict(session_data)
-                        self.sessions[session.id] = session
-                        loaded += 1
-                    else:
-                        # Clean up expired session file
-                        file.unlink()
-            except Exception as e:
-                logger.error("Error loading session %s: %s", file, str(e))
-                errors += 1
-                try:
-                    file.unlink()  # Clean up corrupted session file
-                except:
-                    pass
-        
-        logger.info("Loaded %d sessions, encountered %d errors", loaded, errors)
-    
-    def _is_session_expired(self, last_active: datetime) -> bool:
-        """Check if a session is expired."""
-        return datetime.now() - last_active > self.session_timeout
-    
-    def create_session(self) -> str:
-        """Create a new session with logging."""
-        session = Session()
-        self.sessions[session.id] = session
-        self._persist_session(session)
-        logger.info("Created new session: %s", session.id)
-        return session.id
-    
-    def get_session(self, session_id: str) -> Optional[Session]:
-        """Get and validate session, updating last_active time."""
-        session = self.sessions.get(session_id)
-        
-        if not session:
-            # Try to load from persistent storage
-            session_data = self._load_session(session_id)
-            if session_data and not self._is_session_expired(session_data['last_active']):
-                session = Session.from_dict(session_data)
-                self.sessions[session_id] = session
-                logger.debug("Loaded session from storage: %s", session_id)
-            else:
-                logger.warning("Invalid or expired session requested: %s", session_id)
-                return None
-        
-        if session:
-            session.last_active = datetime.now()
-            self._persist_session(session)
-        
-        return session
-    
-    def _persist_session(self, session: Session) -> None:
-        """Save session to disk."""
-        try:
-            session_dict = session.to_dict()
-            if session_dict is None:
-                logger.error("Session serialization failed")
-                return
-                
-            file_path = self.storage_dir / f"{session.id}.session"
-            with open(file_path, 'wb') as f:
-                pickle.dump(session_dict, f)
-                
-            # Verify persistence
-            if not file_path.exists():
-                logger.error(f"Session file not created: {file_path}")
-            else:
-                logger.debug(f"Successfully persisted session: {session.id}")
-                
-        except Exception as e:
-            logger.error(f"Error saving session {session.id}: {str(e)}")
-    
-    def _load_session(self, session_id: str) -> Optional[dict]:
-        """Load session from disk with error handling."""
-        try:
-            file_path = self.storage_dir / f"{session_id}.session"
-            if file_path.exists():
-                with open(file_path, 'rb') as f:
-                    return pickle.load(f)
-        except Exception as e:
-            logger.error("Error loading session %s: %s", session_id, str(e))
-            # Clean up corrupted session file
-            try:
-                file_path.unlink()
-            except:
-                pass
-        return None
-    
-    def cleanup_expired_sessions(self) -> None:
-        """Remove expired sessions from memory and disk."""
-        current_time = datetime.now()
-        expired_sessions = [
-            sid for sid, session in self.sessions.items()
-            if current_time - session.last_active > self.session_timeout
-        ]
-        
-        cleaned = 0
-        errors = 0
-        for sid in expired_sessions:
-            try:
-                # Remove from memory
-                del self.sessions[sid]
-                
-                # Remove from disk
-                file_path = self.storage_dir / f"{sid}.session"
-                if file_path.exists():
-                    file_path.unlink()
-                cleaned += 1
-            except Exception as e:
-                logger.error("Error cleaning up session %s: %s", sid, str(e))
-                errors += 1
-        
-        if expired_sessions:
-            logger.info("Cleaned up %d expired sessions (%d errors)", cleaned, errors)
+    """
+    Postgres-backed Session Manager.
+    Stores each session (including the pickled fl_manager) in a 'sessions' table.
+    """
 
-# Global session manager instance with 30-minute timeout
+    def __init__(self, session_timeout: int = 30):
+        # We do a time-based expiration, in minutes
+        self.session_timeout = timedelta(minutes=session_timeout)
+
+        # Read DATABASE_URL from environment (Railway env var)
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL is not set in the environment variables")
+
+        # Create a SQLAlchemy engine
+        self.engine = create_engine(database_url, echo=False)
+
+        # On initialization, ensure the 'sessions' table exists
+        self._create_table_if_not_exists()
+
+        logger.info(
+            "Postgres-backed SessionManager initialized with a %d-minute timeout",
+            session_timeout
+        )
+
+    def _create_table_if_not_exists(self):
+        """
+        Create a table named 'sessions' if it doesn't already exist.
+        Columns:
+         - session_id (text primary key)
+         - data (bytea) => we'll store a pickled dict from Session.to_dict()
+         - created (timestamp)
+         - last_active (timestamp)
+        """
+        create_sql = """
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            data BYTEA NOT NULL,
+            created TIMESTAMP NOT NULL,
+            last_active TIMESTAMP NOT NULL
+        );
+        """
+        with self.engine.begin() as conn:
+            conn.execute(text(create_sql))
+
+    def create_session(self) -> str:
+        """
+        Create a new Session object, insert it into the DB, and return the session_id.
+        """
+        new_session = Session()  # from our Session class
+        self._persist_session(new_session)
+        logger.info("Created new session: %s", new_session.id)
+        return new_session.id
+
+    def get_session(self, session_id: str) -> Optional[Session]:
+        """
+        Load a session from DB by session_id, check if it's expired, update last_active, re-persist.
+        Returns None if not found or expired.
+        """
+        session = self._load_session_from_db(session_id)
+        if not session:
+            logger.warning("Session %s not found in DB", session_id)
+            return None
+
+        # Check if expired
+        if self._is_session_expired(session.last_active):
+            logger.info("Session %s is expired; deleting...", session_id)
+            self._delete_session(session_id)
+            return None
+
+        # Update last_active
+        session.last_active = datetime.now()
+        self._persist_session(session)
+        return session
+
+    def _persist_session(self, session: Session) -> None:
+        """
+        Insert or update the given session in the DB (upsert by session_id).
+        """
+        # Convert session to dict, then pickle that dict
+        session_dict = session.to_dict()
+        pickled_data = pickle.dumps(session_dict)
+
+        with self.engine.begin() as conn:
+            # We do an UPSERT by session_id
+            conn.execute(
+                text("""
+                    INSERT INTO sessions (session_id, data, created, last_active)
+                    VALUES (:sid, :data, :created, :last_active)
+                    ON CONFLICT (session_id) DO UPDATE
+                      SET data = EXCLUDED.data,
+                          last_active = EXCLUDED.last_active
+                """),
+                {
+                    "sid": session.id,
+                    "data": pickled_data,
+                    "created": session.created,
+                    "last_active": session.last_active
+                }
+            )
+
+    def _load_session_from_db(self, session_id: str) -> Optional[Session]:
+        """
+        Fetch the 'data' (pickled dict) from 'sessions' table by session_id, unpickle, and return a Session.
+        """
+        with self.engine.begin() as conn:
+            row = conn.execute(
+                text("SELECT data, created, last_active FROM sessions WHERE session_id = :sid"),
+                {"sid": session_id}
+            ).fetchone()
+
+        if not row:
+            return None
+
+        pickled_data = row[0]
+        try:
+            session_dict = pickle.loads(pickled_data)
+            session_obj = Session.from_dict(session_dict)
+            return session_obj
+        except Exception as e:
+            logger.error("Error unpickling session %s: %s", session_id, e)
+            # If corrupted, delete it
+            self._delete_session(session_id)
+            return None
+
+    def _delete_session(self, session_id: str):
+        """Remove a session row from DB."""
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM sessions WHERE session_id = :sid"),
+                {"sid": session_id}
+            )
+
+    def _is_session_expired(self, last_active: datetime) -> bool:
+        """Check if the session has been inactive for longer than session_timeout."""
+        return (datetime.now() - last_active) > self.session_timeout
+
+    def cleanup_expired_sessions(self):
+        """
+        Optional method: Remove expired sessions from DB. You can call this periodically if you like.
+        """
+        # Example: We'll load all sessions, check which are expired, and delete them.
+        # For large scale, you’d do a direct SQL query with a timestamp condition.
+        with self.engine.begin() as conn:
+            rows = conn.execute(text("SELECT session_id, data, last_active FROM sessions")).fetchall()
+
+        expired_count = 0
+        for row in rows:
+            sid = row[0]
+            pickled_data = row[1]
+            last_active = row[2]
+
+            if self._is_session_expired(last_active):
+                self._delete_session(sid)
+                expired_count += 1
+
+        if expired_count > 0:
+            logger.info("Cleaned up %d expired sessions", expired_count)
+
+
+# Finally, instantiate a global SessionManager (like you did before).
+# We can keep the same name `session_manager` so imports don't break.
+from sqlalchemy import create_engine
+
 session_manager = SessionManager(session_timeout=30)
